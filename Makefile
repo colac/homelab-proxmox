@@ -44,12 +44,29 @@ check:
 	fi
 
 	@echo "Checking Node.js version..."
-	@NODE_VERSION=$$(node -v | sed 's/v//'); \
+# 	@NODE_VERSION=$$(node -v | sed 's/v//'); \
+# 	if [ "$$(printf '%s\n' $(REQUIRED_NODE_VERSION) $$NODE_VERSION | sort -V | head -n1)" != "$(REQUIRED_NODE_VERSION)" ]; then \
+# 		echo "❌ Node.js $$NODE_VERSION is too old. Required: $(REQUIRED_NODE_VERSION) or higher."; \
+# 		exit 1; \
+# 	else \
+# 		echo "✅ Node.js $$NODE_VERSION meets requirement."; \
+# 	fi
+
+	@NODE=$$(node -v 2>/dev/null); \
+	EXIT_CODE=$$?; \
+	if [ $$EXIT_CODE -ne 0 ]; then \
+		echo "❌ node command failed (exit $$EXIT_CODE). Node is missing or broken."; \
+		exit 1; \
+	else \
+	    echo "✅ node exists"; \
+	fi
+
+	@NODE_VERSION=$$(echo $$NODE_VERSION_RAW | sed 's/^v//'); \
 	if [ "$$(printf '%s\n' $(REQUIRED_NODE_VERSION) $$NODE_VERSION | sort -V | head -n1)" != "$(REQUIRED_NODE_VERSION)" ]; then \
 		echo "❌ Node.js $$NODE_VERSION is too old. Required: $(REQUIRED_NODE_VERSION) or higher."; \
 		exit 1; \
 	else \
-		echo "✅ Node.js $$NODE_VERSION meets requirement."; \
+	    echo "✅ Node.js $$NODE_VERSION meets requirement. (>= $(REQUIRED_NODE_VERSION))"; \
 	fi
 
 all: install
