@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/colac/homelab-proxmox/compare/v1.0.0...v1.1.0) (2025-12-08)
+
+
+### Features
+
+* convert tf to module & docs ([9aaa752](https://github.com/colac/homelab-proxmox/commit/9aaa752200417eab0e0eba4a7d0f4f32cbf12cd0))
+
 # 1.0.0 (2025-12-02)
 
 
