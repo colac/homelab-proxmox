@@ -8,11 +8,11 @@ VENV_DIR := .venv
 NODE_DIR := .node_modules
 NPM_BIN := $(NODE_DIR)/node_modules/.bin
 
-TERRAFORM_VERSION := 1.13.4
+TERRAFORM_VERSION := 1.14.1
 TERRAFORM_DOCS_VERSION := 0.20.0
-TRIVY_VERSION := 0.67.2
+TRIVY_VERSION := 0.68.1
 SHELLCHECK_VERSION := 0.11.0
-TFLINT_VERSION := 0.59.1
+TFLINT_VERSION := 0.60.0
 
 OS := $(shell uname -s)
 OS_LOWER := $(shell uname -s | tr A-Z a-z)
@@ -44,13 +44,6 @@ check:
 	fi
 
 	@echo "Checking Node.js version..."
-# 	@NODE_VERSION=$$(node -v | sed 's/v//'); \
-# 	if [ "$$(printf '%s\n' $(REQUIRED_NODE_VERSION) $$NODE_VERSION | sort -V | head -n1)" != "$(REQUIRED_NODE_VERSION)" ]; then \
-# 		echo "❌ Node.js $$NODE_VERSION is too old. Required: $(REQUIRED_NODE_VERSION) or higher."; \
-# 		exit 1; \
-# 	else \
-# 		echo "✅ Node.js $$NODE_VERSION meets requirement."; \
-# 	fi
 
 	@NODE=$$(node -v 2>/dev/null); \
 	EXIT_CODE=$$?; \
@@ -107,6 +100,7 @@ run-semantic-release:
 install-terraform:
 	@echo "Installing Terraform $(TERRAFORM_VERSION)..."
 	@mkdir -p $(BIN_DIR)
+	@echo "TERRAFORM_URL $(TERRAFORM_URL)"
 	@curl -sSL $(TERRAFORM_URL) -o /tmp/terraform.zip
 	@unzip -o /tmp/terraform.zip -d $(BIN_DIR)
 	@chmod +x $(BIN_DIR)/terraform
