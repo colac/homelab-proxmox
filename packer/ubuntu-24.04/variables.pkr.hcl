@@ -83,7 +83,7 @@ variable "scsi_controller" {
 variable "disk_size" {
   type        = string
   description = "Disk size"
-  default     = "60G"
+  default     = "32G"
 }
 
 variable "storage_pool" {
@@ -119,7 +119,7 @@ variable "vm_cpu_type" {
 variable "vm_memory" {
   type        = number
   description = "Memory in MB"
-  default     = 2048
+  default     = 4096
 }
 
 variable "network_model" {
@@ -134,6 +134,12 @@ variable "network_bridge" {
   default     = "vmbr0"
 }
 
+variable "http_interface" {
+  type        = string
+  description = "Host network interface whose IP is advertised to the VM for the autoinstall HTTP server (empty = auto-detect). Set to the LAN NIC when the host's default route is a VPN."
+  default     = ""
+}
+
 # --------------------------------------------------------
 # Cloud-init and autoinstall
 # --------------------------------------------------------
@@ -145,8 +151,9 @@ variable "username" {
 
 variable "password" {
   type        = string
-  description = "Default user password"
+  description = "Default user plaintext password (unused unless ssh_password is re-enabled; console login uses password_hash)"
   sensitive   = true
+  default     = ""
 }
 
 variable "password_hash" {
@@ -276,6 +283,16 @@ variable "tags" {
   default     = "packer;ubuntu"
 }
 
+# DNS nameservers configured during autoinstall (PiHole primary, public fallback).
+variable "nameservers" {
+  type        = list(string)
+  description = "DNS nameservers for the VM (first is primary)."
+  default = [
+    "192.168.1.53",
+    "1.1.1.1"
+  ]
+}
+
 # NTP Servers
 variable "ntp_servers" {
   type        = list(string)
@@ -292,6 +309,13 @@ variable "ntp_servers" {
 variable "install_docker" {
   type        = bool
   description = "Wheter to install Docker"
+  default     = true
+}
+
+# Tailscale
+variable "install_tailscale" {
+  type        = bool
+  description = "Whether to install Tailscale (the node is not authenticated at build time)"
   default     = true
 }
 
@@ -318,24 +342,4 @@ variable "no_proxy" {
   type        = string
   description = "Comma-separated list of domains or IPs to exclude from proxy"
   default     = "localhost,127.0.0.1"
-}
-
-variable "proxmox_storage_pool" {
-  type    = string
-  default = null
-}
-
-variable "ssh_username" {
-  type    = string
-  default = null
-}
-
-variable "domain" {
-  type    = string
-  default = null
-}
-
-variable "proxmox_iso_storage_pool" {
-  type    = string
-  default = null
 }

@@ -1,0 +1,82 @@
+---
+# Create and configure a single SMB external-storage mount. Expects the loop
+# variable `nextcloud_aio_nas_mount` with keys: name, share, and optional
+# subfolder / user / domain / all_users (which fall back to the shared
+# nextcloud_aio_nas_* defaults). Idempotent: skips creation if the mount exists.
+
+- name: List existing external storage mounts
+  ansible.builtin.command: >-
+    docker exec --user www-data nextcloud-aio-nextcloud
+    php occ files_external:list --output=json
+  register: nextcloud_aio_nas_list
+  changed_when: false
+
+- name: Create and configure NAS mount {{ nextcloud_aio_nas_mount.name }}
+  when: >-
+    ('/' ~ nextcloud_aio_nas_mount.name) not in
+    (nextcloud_aio_nas_list.stdout | from_json | map(attribute='mount_point') | list)
+  block:
+    - name: Create the SMB external storage entry
+      ansible.builtin.command: >-
+        docker exec --user www-data nextcloud-aio-nextcloud
+        php occ files_external:create "/{{ nextcloud_aio_nas_mount.name }}"
+        smb password::password
+      changed_when: true
+
+    - name: Re-list to capture the new mount id
+      ansible.builtin.command: >-
+        docker exec --user www-data nextcloud-aio-nextcloud
+        php occ files_external:list --output=json
+      register: nextcloud_aio_nas_relist
+      changed_when: false
+
+    - name: Resolve the new mount id
+      ansible.builtin.set_fact:
+        nextcloud_aio_nas_id: >-
+          {{ nextcloud_aio_nas_relist.stdout | from_json
+             | selectattr('mount_point', 'equalto', '/' ~ nextcloud_aio_nas_mount.name)
+             | map(attribute='mount_id') | first }}
+
+    - name: Apply SMB connection settings
+      ansible.builtin.command: >-
+        docker exec --user www-data nextcloud-aio-nextcloud
+        php occ files_external:config {{ nextcloud_aio_nas_id }}
+        {{ item.key }} "{{ item.value }}"
+      loop: "{{ nextcloud_aio_nas_settings | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      changed_when: true
+      vars:
+        nextcloud_aio_nas_settings:
+          host: "{{ nextcloud_aio_nas_host }}"
+          share: "{{ nextcloud_aio_nas_mount.share }}"
+          root: "{{ nextcloud_aio_nas_mount.subfolder | default('') }}"
+          domain: "{{ nextcloud_aio_nas_mount.domain | default(nextcloud_aio_nas_domain) }}"
+          user: "{{ nextcloud_aio_nas_mount.user | default(nextcloud_aio_nas_user) }}"
+
+    - name: Set the NAS password
+      ansible.builtin.command: >-
+        docker exec --user www-data nextcloud-aio-nextcloud
+        php occ files_external:config {{ nextcloud_aio_nas_id }}
+        password "{{ nextcloud_aio_nas_mount.password | default(nextcloud_aio_nas_password) }}"
+      no_log: true
+      changed_when: true
+
+    # occ-created system mounts are global (all users) by default. Only
+    # restrict when applicable_users is set on the mount — this flips it from
+    # global to just the listed users (used to scope the read-only Familia
+    # copy to a single account instead of everyone).
+    - name: Restrict applicable users for {{ nextcloud_aio_nas_mount.name }}
+      ansible.builtin.command: >-
+        docker exec --user www-data nextcloud-aio-nextcloud
+        php occ files_external:applicable {{ nextcloud_aio_nas_id }}
+        --add-user={{ item }}
+      loop: "{{ nextcloud_aio_nas_mount.applicable_users | default([]) }}"
+      changed_when: true
+
+    - name: Set read-only for {{ nextcloud_aio_nas_mount.name }}
+      ansible.builtin.command: >-
+        docker exec --user www-data nextcloud-aio-nextcloud
+        php occ files_external:option {{ nextcloud_aio_nas_id }} readonly true
+      when: nextcloud_aio_nas_mount.readonly | default(false)
+      changed_when: true

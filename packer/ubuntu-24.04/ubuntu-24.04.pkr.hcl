@@ -59,7 +59,13 @@ source "proxmox-iso" "ubuntu-24-04" {
   cloud_init              = true
   cloud_init_storage_pool = var.storage_pool
 
-  http_bind_address = "0.0.0.0"
+  # IP advertised to the VM in the boot command. Empty var.http_interface =
+  # auto-detect (binds all interfaces). Set it to the LAN NIC when building from
+  # a host whose default route is a VPN, so {{ .HTTPIP }} resolves to the
+  # reachable LAN address instead of the tunnel IP. (http_interface and
+  # http_bind_address are mutually exclusive in the proxmox plugin.)
+  http_interface    = var.http_interface != "" ? var.http_interface : null
+  http_bind_address = var.http_interface != "" ? null : "0.0.0.0"
 
   http_port_min = 8181
   http_port_max = 8181
@@ -77,7 +83,7 @@ source "proxmox-iso" "ubuntu-24-04" {
     "e<wait>",
     "<down><down><down><end>",
     "<bs><bs><bs><bs><wait>",
-    "autoinstall ds=nocloud-net\\;s=http://192.168.1.149:{{ .HTTPPort }}/ ---<wait>",
+    "autoinstall ds=nocloud-net\\;s=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ ---<wait>",
     "<f10><wait>"
   ]
   boot      = "c"
@@ -120,15 +126,6 @@ build {
     environment_vars = ["DEBIAN_FRONTEND=noninteractive"]
   }
 
-  #  # -----------------------
-  #  # Ensure alloy configs are available inside the guest
-  #  # Use file provisioners to copy directories to the instance.
-  #  # -----------------------
-  #  provisioner "file" {
-  #    source      = "${path.root}/alloy/"
-  #    destination = "/tmp/alloy"
-  #  }
-
   # -----------------------
   # Upload custom ROOT CA certificates
   # -----------------------
@@ -144,18 +141,20 @@ build {
   provisioner "shell" {
     environment_vars = [
       "INSTALL_DOCKER=${var.install_docker}",
+      "INSTALL_TAILSCALE=${var.install_tailscale}",
       "ENABLE_PROXY=${var.enable_proxy}",
       "HTTP_PROXY=${var.http_proxy}",
       "HTTPS_PROXY=${var.https_proxy}",
       "NO_PROXY=${var.no_proxy}",
     ]
     execute_command = "sudo -E bash '{{ .Path }}'"
-    # Use absolute paths under /tmp/scripts so it's clear where they run from
+    # Keep execution order deterministic: proxy -> ca -> docker -> alloy -> tailscale
     scripts = [
       "${path.root}/scripts/00-configure-proxy.sh",
       "${path.root}/scripts/10-install-custom-ca.sh",
       "${path.root}/scripts/20-install-docker.sh",
-      "${path.root}/scripts/30-install-alloy.sh"
+      "${path.root}/scripts/30-install-alloy.sh",
+      "${path.root}/scripts/40-install-tailscale.sh"
     ]
   }
 
@@ -165,7 +164,6 @@ build {
   provisioner "shell" {
     execute_command = "sudo -E bash '{{ .Path }}'"
     scripts = [
-      #"${path.root}/scripts/80-security-scans.sh",
       "${path.root}/scripts/99-cleanup-seal.sh"
     ]
   }

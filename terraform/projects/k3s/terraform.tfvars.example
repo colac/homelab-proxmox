@@ -1,0 +1,28 @@
+# ----------------------------------------------------------------------------
+# Example tfvars for deploying the k3s VM.
+# Copy to terraform.tfvars and fill in the secrets (never commit the real file).
+# ----------------------------------------------------------------------------
+
+# Proxmox API connection
+pm_api_url          = "https://pve.example.com:8006/api2/json"
+pm_api_token_id     = "terraform@pve!terraform-automation"
+pm_api_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Where to place the VM
+proxmox_node    = "pve"
+proxmox_pool    = null
+proxmox_storage = "local-lvm"
+network_bridge  = "vmbr0"
+
+# Template produced by the Packer build
+template_name = "ubuntu-24.04-template"
+
+# k3s VM sizing
+vm_name    = "k3s"
+cpu_cores  = 2
+memory_mb  = 8192
+disk0_size = "32G"
+
+# Cloud-init user + SSH key used by Terraform and, later, Ansible
+vm_user        = "ubuntu"
+ssh_public_key = "~/.ssh/id_rsa.pub"

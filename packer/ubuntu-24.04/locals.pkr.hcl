@@ -17,6 +17,7 @@ locals {
     additional_users    = var.additional_users
     ssh_authorized_keys = var.ssh_authorized_keys
     ntp_servers         = var.ntp_servers
+    nameservers         = var.nameservers
   })
 
   # Meta data (can also be templated if needed)

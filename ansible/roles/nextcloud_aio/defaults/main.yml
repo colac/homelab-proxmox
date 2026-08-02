@@ -1,0 +1,35 @@
+---
+nextcloud_aio_dir: /opt/nextcloud-aio
+nextcloud_aio_image: nextcloud/all-in-one:latest
+nextcloud_aio_admin_port: 8080
+nextcloud_aio_apache_port: 11000
+nextcloud_aio_apache_ip_binding: 127.0.0.1
+nextcloud_aio_skip_domain_validation: true
+nextcloud_aio_extra_env: {}
+
+# Nextcloud users to create beyond the AIO admin account (via occ user:add,
+# idempotent). Defined in vault.yml so usernames and passwords stay together
+# out of the repo. Each item: name, password, optional display_name, and
+# optional nas_folder (true = also attach <nextcloud_aio_nas_personal_share>/
+# <name> as a private read-write mount scoped to that user).
+nextcloud_aio_users: []
+
+# SMB share that per-user private folders live on (subfolder = username).
+nextcloud_aio_nas_personal_share: ""
+
+# NAS external storage (SMB). Disabled by default; set the real values in
+# group_vars and the credentials in vault.yml.
+nextcloud_aio_nas_enabled: false
+# Shared SMB connection defaults, applied to every mount unless an item
+# overrides them. user/password come from vault.
+nextcloud_aio_nas_host: ""
+nextcloud_aio_nas_domain: "WORKGROUP"
+nextcloud_aio_nas_user: ""
+# One entry per share to attach; each item: name (folder shown in Files), share
+# (SMB share name). Optional per-item overrides: subfolder, user, domain,
+# password. Optional access control: applicable_users (list — restricts the
+# mount from the default "all users" to just these accounts) and readonly
+# (bool — applies to every account that can see the mount, admin included).
+# Both are applied at creation only: changing them later requires deleting the
+# mount (occ files_external:delete) so the next run recreates it.
+nextcloud_aio_nas_mounts: []

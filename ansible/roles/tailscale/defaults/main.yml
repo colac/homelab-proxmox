@@ -1,0 +1,8 @@
+---
+tailscale_authkey: ""
+tailscale_hostname: nextcloud
+# Advertise the LAN so off-tailnet devices can reach the VM's LAN IP and the
+# PiHole (for split-DNS of the Nextcloud domain) through this node. The route
+# must be approved once in the Tailscale admin console.
+tailscale_advertise_routes: "192.168.1.0/24"
+tailscale_up_extra_args: "--ssh"

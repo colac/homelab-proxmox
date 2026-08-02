@@ -46,7 +46,7 @@ variable "memory_mb" {
 
 variable "disk0_size" {
   type    = string
-  default = "32"
+  default = "32G"
 }
 
 variable "proxmox_storage" {
