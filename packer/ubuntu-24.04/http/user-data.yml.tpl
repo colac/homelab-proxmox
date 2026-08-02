@@ -16,8 +16,9 @@ autoinstall:
         dhcp4: true
         nameservers:
           addresses:
-            - 192.168.1.1
-            - 8.8.8.8
+%{ for ns in nameservers ~}
+            - ${ns}
+%{ endfor ~}
 
   # Storage
   storage:

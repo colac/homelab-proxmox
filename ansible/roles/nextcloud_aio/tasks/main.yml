@@ -1,0 +1,50 @@
+---
+- name: Ensure Docker is running and enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure the Nextcloud AIO project directory exists
+  ansible.builtin.file:
+    path: "{{ nextcloud_aio_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Render the Nextcloud AIO compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ nextcloud_aio_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart Nextcloud AIO
+
+- name: Deploy the Nextcloud AIO stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ nextcloud_aio_dir }}"
+    state: present
+    pull: missing
+
+- name: Create configured Nextcloud users
+  ansible.builtin.include_tasks: users.yml
+  when: nextcloud_aio_users | default([]) | length > 0
+
+- name: Attach the TrueNAS mounts as external storage
+  ansible.builtin.include_tasks: nas.yml
+  when: nextcloud_aio_nas_enabled
+
+- name: Show how to finish setup
+  vars:
+    nc_host: "{{ ansible_host | default(inventory_hostname) }}"
+    nc_user: "{{ ansible_user | default('ubuntu') }}"
+  ansible.builtin.debug:
+    msg:
+      - "Nextcloud AIO mastercontainer is up."
+      - "Tunnel to the admin UI (it is bound to localhost):"
+      - "  ssh -L {{ nextcloud_aio_admin_port }}:localhost:{{ nextcloud_aio_admin_port }} {{ nc_user }}@{{ nc_host }}"
+      - "Then browse to https://localhost:{{ nextcloud_aio_admin_port }}"
+      - "Set the Nextcloud domain to: {{ nextcloud_domain }}"
+      - "(must match the Caddy reverse proxy; the domain is permanent in AIO)."

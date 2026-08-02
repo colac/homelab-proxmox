@@ -1,0 +1,44 @@
+---
+# Secrets for the Nextcloud host. Copy to vault.yml, fill in real values, then
+# encrypt — vault.yml is git-ignored:
+#
+#   cp vault.yml.example vault.yml
+#   ansible-vault encrypt vault.yml
+#   ansible-vault edit vault.yml          # to change it later
+#
+# Run the playbook so these decrypt at runtime:
+#   ansible-playbook site.yml -e @vault.yml --ask-vault-pass
+
+# --- Not secret, but kept here to keep them out of the tracked repo ---
+# Public hostname Nextcloud is served at. MUST match the domain you submit in
+# AIO's first-run UI and the Caddy vhost.
+nextcloud_domain: "nextcloud.example.com"
+# Let's Encrypt account email (expiry notices). Empty = anonymous registration.
+reverse_proxy_acme_email: "you@example.com"
+
+# --- Secrets ---
+# TrueNAS SMB user + password with read/write on the share.
+nextcloud_aio_nas_user: "CHANGE_ME"
+nextcloud_aio_nas_password: "CHANGE_ME"
+
+# Nextcloud accounts to create beyond the AIO admin. Usernames live here with
+# their passwords so neither is hard-coded in the tracked repo.
+#   name          login name (required)
+#   password      required
+#   display_name  optional, defaults to name
+#   nas_folder    optional; true attaches a private read-write NAS folder named
+#                 after the user (share nextcloud_aio_nas_personal_share,
+#                 subfolder = the username), visible only to that account.
+#                 The subfolder must already exist on the NAS.
+nextcloud_aio_users:
+  - name: "alice"
+    display_name: "Alice"
+    password: "CHANGE_ME"
+    nas_folder: true
+
+# Cloudflare API token for ACME DNS-01 (Zone:DNS:Edit scoped to your zone).
+# Used by the Caddy reverse proxy to get the TLS cert.
+cloudflare_dns_api_token: "CHANGE_ME"
+
+# Optional: Tailscale auth key to join the tailnet non-interactively.
+tailscale_authkey: ""

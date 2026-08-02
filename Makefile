@@ -1,18 +1,18 @@
 # Cross-platform Makefile for installing dev tools with reproducibility and CI/CD in mind
 
-REQUIRED_NODE_VERSION := 20.18.0
-REQUIRED_PYTHON_VERSION := 3.8.0
+REQUIRED_PYTHON_VERSION := 3.12.0
+REQUIRED_NODE_VERSION := 26.4.0
 
-BIN_DIR := $(HOME)/bin
+BIN_DIR := $(HOME)/.local/bin
 VENV_DIR := .venv
 NODE_DIR := .node_modules
 NPM_BIN := $(NODE_DIR)/node_modules/.bin
 
-TERRAFORM_VERSION := 1.14.1
-TERRAFORM_DOCS_VERSION := 0.20.0
-TRIVY_VERSION := 0.68.1
+TERRAFORM_VERSION := 1.15.7
+TERRAFORM_DOCS_VERSION := 0.21.0
+TRIVY_VERSION := 0.71.2
 SHELLCHECK_VERSION := 0.11.0
-TFLINT_VERSION := 0.60.0
+TFLINT_VERSION := 0.63.1
 
 OS := $(shell uname -s)
 OS_LOWER := $(shell uname -s | tr A-Z a-z)
@@ -43,24 +43,34 @@ check:
 		echo "✅ Python $$PYTHON_VERSION meets requirement."; \
 	fi
 
+	@echo "Checking python3-venv availability..."
+	@python3 -c "import ensurepip" 2>/dev/null || { \
+		echo "❌ python3-venv is not installed. Run: sudo apt-get install -y python3-venv"; \
+		exit 1; \
+	}
+	@echo "✅ python3-venv is available."
+
 	@echo "Checking Node.js version..."
 
-	@NODE=$$(node -v 2>/dev/null); \
-	EXIT_CODE=$$?; \
-	if [ $$EXIT_CODE -ne 0 ]; then \
-		echo "❌ node command failed (exit $$EXIT_CODE). Node is missing or broken."; \
+	@NODE_RAW=$$(node -v 2>/dev/null); \
+	if [ $$? -ne 0 ] || [ -z "$$NODE_RAW" ]; then \
+		echo "❌ Node.js is not installed or not working."; \
 		exit 1; \
-	else \
-	    echo "✅ node exists"; \
-	fi
-
-	@NODE_VERSION=$$(echo $$NODE_VERSION_RAW | sed 's/^v//'); \
+	fi; \
+	NODE_VERSION=$$(echo $$NODE_RAW | sed 's/^v//'); \
 	if [ "$$(printf '%s\n' $(REQUIRED_NODE_VERSION) $$NODE_VERSION | sort -V | head -n1)" != "$(REQUIRED_NODE_VERSION)" ]; then \
 		echo "❌ Node.js $$NODE_VERSION is too old. Required: $(REQUIRED_NODE_VERSION) or higher."; \
 		exit 1; \
 	else \
-	    echo "✅ Node.js $$NODE_VERSION meets requirement. (>= $(REQUIRED_NODE_VERSION))"; \
+		echo "✅ Node.js $$NODE_VERSION meets requirement. (>= $(REQUIRED_NODE_VERSION))"; \
 	fi
+
+	@echo "Checking npm..."
+	@command -v npm >/dev/null 2>&1 || { \
+		echo "❌ npm not found. Install it with: sudo apt-get install -y npm"; \
+		exit 1; \
+	}
+	@echo "✅ npm $$(npm --version) is available."
 
 all: install
 
@@ -71,6 +81,11 @@ install-binaries: install-terraform install-terraform-docs install-trivy install
 
 install-python-tools:
 	@echo "Creating Python virtualenv at $(VENV_DIR)..."
+	@python3 -c "import ensurepip" 2>/dev/null || { \
+		PYVER=$$(python3 -c 'import sys; print(str(sys.version_info.major) + "." + str(sys.version_info.minor))'); \
+		echo "Installing python$${PYVER}-venv..."; \
+		sudo apt-get install -y python$${PYVER}-venv; \
+	}
 	@python3 -m venv $(VENV_DIR)
 	@$(VENV_DIR)/bin/pip install --upgrade pip
 	@$(VENV_DIR)/bin/pip install -r requirements.txt
@@ -79,6 +94,10 @@ install-python-tools:
 
 install-node-tools:
 	@echo "Installing Node.js tools using npm ci..."
+	@command -v npm >/dev/null 2>&1 || { \
+		echo "❌ npm not found. Install it with: sudo apt-get install -y npm"; \
+		exit 1; \
+	}
 	@mkdir -p $(NODE_DIR)
 	@cp package.json package-lock.json $(NODE_DIR)/
 	@cd $(NODE_DIR) && npm ci
@@ -95,14 +114,14 @@ lint-all:
 	@$(VENV_DIR)/bin/pre-commit run --all-files
 
 run-semantic-release:
-	@$(NPM_BIN)/npx semantic-release --no-ci --dry-run
+	@$(NPM_BIN)/semantic-release --no-ci --dry-run
 
 install-terraform:
 	@echo "Installing Terraform $(TERRAFORM_VERSION)..."
 	@mkdir -p $(BIN_DIR)
 	@echo "TERRAFORM_URL $(TERRAFORM_URL)"
-	@curl -sSL $(TERRAFORM_URL) -o /tmp/terraform.zip
-	@unzip -o /tmp/terraform.zip -d $(BIN_DIR)
+	@curl -sSfL $(TERRAFORM_URL) -o /tmp/terraform.zip
+	@unzip -o /tmp/terraform.zip terraform -d $(BIN_DIR)
 	@chmod +x $(BIN_DIR)/terraform
 	@rm /tmp/terraform.zip
 	@echo "Terraform installed at $(BIN_DIR)/terraform"
@@ -110,7 +129,7 @@ install-terraform:
 install-terraform-docs:
 	@echo "Installing terraform-docs $(TERRAFORM_DOCS_VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	@curl -sSL $(TERRAFORM_DOCS_URL) -o /tmp/terraform-docs.tar.gz
+	@curl -sSfL $(TERRAFORM_DOCS_URL) -o /tmp/terraform-docs.tar.gz
 	@tar -xzf /tmp/terraform-docs.tar.gz -C /tmp
 	@mv /tmp/terraform-docs $(BIN_DIR)/terraform-docs
 	@chmod +x $(BIN_DIR)/terraform-docs
@@ -120,7 +139,7 @@ install-terraform-docs:
 install-trivy:
 	@echo "Installing Trivy $(TRIVY_VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	@curl -sSL $(TRIVY_URL) -o /tmp/trivy.tar.gz
+	@curl -sSfL $(TRIVY_URL) -o /tmp/trivy.tar.gz
 	@tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
 	@mv /tmp/trivy $(BIN_DIR)/trivy
 	@chmod +x $(BIN_DIR)/trivy
@@ -130,7 +149,7 @@ install-trivy:
 install-shellcheck:
 	@echo "Installing ShellCheck $(SHELLCHECK_VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	@curl -sSL $(SHELLCHECK_URL) -o /tmp/shellcheck.tar.xz
+	@curl -sSfL $(SHELLCHECK_URL) -o /tmp/shellcheck.tar.xz
 	@tar -xf /tmp/shellcheck.tar.xz -C /tmp
 	@mv /tmp/shellcheck-v$(SHELLCHECK_VERSION)/shellcheck $(BIN_DIR)/shellcheck
 	@chmod +x $(BIN_DIR)/shellcheck
@@ -140,8 +159,8 @@ install-shellcheck:
 install-tflint:
 	@echo "Installing TFLint $(TFLINT_VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	@curl -sSL $(TFLINT_URL) -o /tmp/tflint.zip
-	@unzip -o /tmp/tflint.zip -d $(BIN_DIR)
+	@curl -sSfL $(TFLINT_URL) -o /tmp/tflint.zip
+	@unzip -o /tmp/tflint.zip tflint -d $(BIN_DIR)
 	@chmod +x $(BIN_DIR)/tflint
 	@rm /tmp/tflint.zip
 	@echo "TFLint installed at $(BIN_DIR)/tflint"

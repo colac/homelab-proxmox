@@ -7,7 +7,7 @@
 # Expected env vars:
 # ENABLE_PROXY: If true will configure proxy
 # HTTP_PROXY: will be used to create http_proxy, and HTTP_PROXY env vars
-# HTTP_PROXYS: will be used to create https_proxy, and HTTPs_PROXY env vars
+# HTTPS_PROXY: will be used to create https_proxy, and HTTPS_PROXY env vars
 # NO_PROXY: will be used to create no_proxy, and NO_PROXY env vars
 ###############################################################################
 

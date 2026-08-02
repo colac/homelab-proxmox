@@ -1,16 +1,21 @@
+# base-vm (Terraform module)
+
+Reusable module that clones a Proxmox VM template into a cloud-init VM. Used by
+the projects under `terraform/projects/`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | > 1.9.0, < 2.0 |
-| <a name="requirement_proxmox"></a> [proxmox](#requirement\_proxmox) | 3.0.2-rc06 |
+| <a name="requirement_proxmox"></a> [proxmox](#requirement\_proxmox) | 3.0.2-rc07 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_proxmox"></a> [proxmox](#provider\_proxmox) | 3.0.2-rc06 |
+| <a name="provider_proxmox"></a> [proxmox](#provider\_proxmox) | 3.0.2-rc07 |
 
 ## Modules
 
@@ -20,14 +25,14 @@ No modules.
 
 | Name | Type |
 |------|------|
-| [proxmox_vm_qemu.ubuntu_vm](https://registry.terraform.io/providers/Telmate/proxmox/3.0.2-rc06/docs/resources/vm_qemu) | resource |
+| [proxmox_vm_qemu.ubuntu_vm](https://registry.terraform.io/providers/Telmate/proxmox/3.0.2-rc07/docs/resources/vm_qemu) | resource |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_cpu_cores"></a> [cpu\_cores](#input\_cpu\_cores) | n/a | `number` | `2` | no |
-| <a name="input_disk0_size"></a> [disk0\_size](#input\_disk0\_size) | n/a | `string` | `"20G"` | no |
+| <a name="input_disk0_size"></a> [disk0\_size](#input\_disk0\_size) | n/a | `string` | `"32G"` | no |
 | <a name="input_memory_mb"></a> [memory\_mb](#input\_memory\_mb) | n/a | `number` | `8192` | no |
 | <a name="input_network_bridge"></a> [network\_bridge](#input\_network\_bridge) | n/a | `string` | `"vmbr0"` | no |
 | <a name="input_proxmox_node"></a> [proxmox\_node](#input\_proxmox\_node) | n/a | `string` | `"pve"` | no |

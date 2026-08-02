@@ -1,0 +1,68 @@
+---
+- name: Fail early if the Cloudflare API token is missing
+  ansible.builtin.assert:
+    that: reverse_proxy_cloudflare_api_token | length > 0
+    fail_msg: >-
+      reverse_proxy_cloudflare_api_token is empty. Put cloudflare_dns_api_token
+      in vault.yml — a Cloudflare token with Zone:DNS:Edit on the domain's zone.
+    quiet: true
+
+- name: Ensure Docker is running and enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure the reverse-proxy project directory exists
+  ansible.builtin.file:
+    path: "{{ reverse_proxy_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Render the Caddy build file
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ reverse_proxy_dir }}/Dockerfile"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Rebuild Caddy
+
+- name: Render the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ reverse_proxy_dir }}/Caddyfile"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart Caddy
+
+- name: Write the Cloudflare API token env file
+  ansible.builtin.copy:
+    content: "CLOUDFLARE_API_TOKEN={{ reverse_proxy_cloudflare_api_token }}\n"
+    dest: "{{ reverse_proxy_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart Caddy
+
+- name: Render the Caddy compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ reverse_proxy_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart Caddy
+
+- name: Build and deploy the Caddy reverse proxy
+  community.docker.docker_compose_v2:
+    project_src: "{{ reverse_proxy_dir }}"
+    state: present
+    build: policy
+    # The image is built locally (nextcloud-caddy:local); never try to pull it
+    # from a registry, which would emit a "pull access denied" warning.
+    pull: never

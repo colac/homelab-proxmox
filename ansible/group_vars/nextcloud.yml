@@ -1,0 +1,104 @@
+---
+# ===========================================================================
+# Domain & TLS (Caddy reverse proxy)
+# ===========================================================================
+# A Caddy reverse proxy on the VM terminates TLS with a Let's Encrypt cert
+# obtained via Cloudflare DNS-01 (no inbound ports opened). Reachable privately
+# only: on the LAN directly, and off-LAN over Tailscale.
+#
+# To keep the hostname out of the tracked repo, the following live in vault.yml
+# (git-ignored) rather than here — see vault.yml.example:
+#   nextcloud_domain          public hostname; MUST match AIO's submitted domain
+#   reverse_proxy_acme_email  Let's Encrypt account email (expiry notices)
+#   cloudflare_dns_api_token  Cloudflare token, Zone:DNS:Edit on your zone
+
+# ===========================================================================
+# Nextcloud AIO (All-in-One) — reverse-proxy mode behind Caddy
+# ===========================================================================
+
+# Where the compose project lives on the VM
+nextcloud_aio_dir: /opt/nextcloud-aio
+nextcloud_aio_image: nextcloud/all-in-one:latest
+
+# AIO admin interface. Bound to localhost only; reach it via an SSH tunnel
+# (ssh -L 8080:localhost:8080 ubuntu@<vm>) or via Tailscale for first-run setup.
+nextcloud_aio_admin_port: 8080
+
+# Reverse-proxy mode: AIO's Apache container listens here, on localhost only,
+# and the Caddy reverse proxy terminates HTTPS in front of it.
+nextcloud_aio_apache_port: 11000
+nextcloud_aio_apache_ip_binding: 127.0.0.1
+
+# The domain is not publicly reachable on :443 (private only), so AIO's public
+# domain validation must be skipped. TLS is handled by Caddy, not AIO.
+nextcloud_aio_skip_domain_validation: true
+
+# Extra environment variables passed to the AIO mastercontainer, e.g.
+# NEXTCLOUD_UPLOAD_LIMIT, NEXTCLOUD_MAX_TIME, TALK_PORT. Leave empty by default.
+nextcloud_aio_extra_env: {}
+
+# ===========================================================================
+# Tailscale
+# ===========================================================================
+
+# Auth key to join the tailnet non-interactively. LEAVE EMPTY to skip
+# `tailscale up` (then authenticate manually later and re-run this playbook).
+# Provide securely, e.g.: --extra-vars "tailscale_authkey=tskey-auth-xxxx"
+tailscale_authkey: "{{ tailscale_authkey }}"
+
+# MagicDNS hostname the node registers as (the .ts.net name; not user-facing —
+# access is via nextcloud_domain above).
+tailscale_hostname: nextcloud
+
+# Advertise the LAN as a subnet route so off-LAN devices reach the VM and the
+# PiHole through this node. Approve the route once in the admin console.
+tailscale_advertise_routes: "192.168.1.0/24"
+
+# Extra flags for `tailscale up` (e.g. enable Tailscale SSH).
+tailscale_up_extra_args: "--ssh"
+
+# ===========================================================================
+# TrueNAS — SMB external storage
+# ===========================================================================
+# Runs after AIO first-run setup (the Nextcloud container must be up). The SMB
+# user and password live in vault.yml (git-ignored), never here.
+nextcloud_aio_nas_enabled: true
+# Shared SMB connection defaults, applied to every mount below.
+# TrueNAS IP. SMB is on :445.
+nextcloud_aio_nas_host: "192.168.1.214"
+nextcloud_aio_nas_domain: "WORKGROUP"
+# nextcloud_aio_nas_user + nextcloud_aio_nas_password -> vault.yml
+
+# Share that per-user private folders come from. A user in nextcloud_aio_users
+# (vault.yml) with `nas_folder: true` gets <share>/<username> mounted as
+# /<username>, visible and writable only to that account — so personal folders
+# need no entry below and no username appears in the tracked repo.
+nextcloud_aio_nas_personal_share: "media"
+
+# Shared mounts, one entry per folder. `name` is the folder shown in
+# Nextcloud's Files; `share` is the SMB share (TrueNAS exposes a single "media"
+# share, /mnt/hdd-home-1/media, with subfolders inside it). Mounts are global
+# (all users) unless `applicable_users` is set. All use the shared
+# nas_user/nas_password from vault unless overridden.
+nextcloud_aio_nas_mounts:
+  # Familia holds curated family photos/videos — critical data, so it is
+  # mounted READ-ONLY for every Nextcloud account, admin included. Nextcloud
+  # is the viewing/sharing surface here, not the editing one: curating (moving
+  # files out of a user's private folder into Familia) is done over SMB
+  # straight to TrueNAS,
+  # where it is an instant same-dataset rename. A cross-mount move inside
+  # Nextcloud would be a full copy-and-delete through the VM anyway, so no
+  # write access is given up in practice — and no accidental drag-and-drop in
+  # the web UI or a desktop sync client can touch the library.
+  - name: "Familia"       # /mnt/hdd-home-1/media/Familia
+    share: "media"
+    subfolder: "Familia"
+    readonly: true
+
+# ===========================================================================
+# Nextcloud users (beyond the AIO admin account)
+# ===========================================================================
+# Defined in vault.yml as nextcloud_aio_users — usernames and passwords are
+# kept out of the tracked repo together. Each entry may set `nas_folder: true`
+# to also get a private folder from nextcloud_aio_nas_personal_share above.
+# See vault.yml.example for the format.

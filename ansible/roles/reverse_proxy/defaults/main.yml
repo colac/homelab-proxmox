@@ -1,0 +1,17 @@
+---
+# The public hostname (`nextcloud_domain`) is a shared value defined in
+# group_vars — the Caddy vhost reads it but does not own it.
+
+# Where the Caddy compose project lives on the VM.
+reverse_proxy_dir: /opt/nextcloud-caddy
+
+# Upstream: AIO's Apache container (reverse-proxy mode, localhost-bound).
+reverse_proxy_upstream_host: 127.0.0.1
+reverse_proxy_upstream_port: 11000
+
+# Email for the Let's Encrypt account (recommended; leave empty to skip).
+reverse_proxy_acme_email: ""
+
+# Cloudflare API token for the ACME DNS-01 challenge (Zone:DNS:Edit on the
+# domain's zone). Provide via vault.yml as cloudflare_dns_api_token.
+reverse_proxy_cloudflare_api_token: "{{ cloudflare_dns_api_token | default('') }}"
