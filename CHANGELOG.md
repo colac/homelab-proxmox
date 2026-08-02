@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/colac/homelab-proxmox/compare/v1.1.0...v1.2.0) (2026-08-02)
+
+
+### Features
+
+* deployed nextcloud+TrueNAS(manual) ([e4cc9d7](https://github.com/colac/homelab-proxmox/commit/e4cc9d7ae4e4ad614efafc9f0f585745bbef1bdc))
+
 # [1.1.0](https://github.com/colac/homelab-proxmox/compare/v1.0.0...v1.1.0) (2025-12-08)
 
 
