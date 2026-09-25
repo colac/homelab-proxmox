@@ -13,6 +13,7 @@ TERRAFORM_DOCS_VERSION := 0.21.0
 TRIVY_VERSION := 0.71.2
 SHELLCHECK_VERSION := 0.11.0
 TFLINT_VERSION := 0.63.1
+SOPS_VERSION := 3.13.3
 
 OS := $(shell uname -s)
 OS_LOWER := $(shell uname -s | tr A-Z a-z)
@@ -25,11 +26,12 @@ TERRAFORM_DOCS_URL := https://github.com/terraform-docs/terraform-docs/releases/
 TRIVY_URL := https://github.com/aquasecurity/trivy/releases/download/v$(TRIVY_VERSION)/trivy_$(TRIVY_VERSION)_$(OS)-64bit.tar.gz
 SHELLCHECK_URL := https://github.com/koalaman/shellcheck/releases/download/v$(SHELLCHECK_VERSION)/shellcheck-v$(SHELLCHECK_VERSION).$(OS_LOWER).$(ARCH_ORIG).tar.xz
 TFLINT_URL := https://github.com/terraform-linters/tflint/releases/download/v$(TFLINT_VERSION)/tflint_$(OS_LOWER)_$(ARCH).zip
+SOPS_URL := https://github.com/getsops/sops/releases/download/v$(SOPS_VERSION)/sops-v$(SOPS_VERSION).$(OS_LOWER).$(ARCH)
 
 .PHONY: check all install install-binaries install-python-tools install-node-tools \
-		install-terraform install-terraform-docs install-trivy install-shellcheck install-tflint \
+		install-terraform install-terraform-docs install-trivy install-shellcheck install-tflint install-sops \
 		install-lint-hooks run-semantic-release lint-all tflint-init setup-gitmessage \
-		clean help
+		direnv-allow clean help
 
 check:
 	@echo "🔍 Checking system dependencies..."
@@ -74,10 +76,10 @@ check:
 
 all: install
 
-install: install-binaries install-python-tools install-node-tools install-lint-hooks tflint-init setup-gitmessage
+install: install-binaries install-python-tools install-node-tools install-lint-hooks tflint-init setup-gitmessage direnv-allow
 	@echo "✅ All tools and hooks installed successfully."
 
-install-binaries: install-terraform install-terraform-docs install-trivy install-shellcheck install-tflint
+install-binaries: install-terraform install-terraform-docs install-trivy install-shellcheck install-tflint install-sops
 
 install-python-tools:
 	@echo "Creating Python virtualenv at $(VENV_DIR)..."
@@ -165,6 +167,26 @@ install-tflint:
 	@rm /tmp/tflint.zip
 	@echo "TFLint installed at $(BIN_DIR)/tflint"
 
+install-sops:
+	@echo "Installing SOPS $(SOPS_VERSION)..."
+	@mkdir -p $(BIN_DIR)
+	@curl -sSfL $(SOPS_URL) -o $(BIN_DIR)/sops
+	@chmod +x $(BIN_DIR)/sops
+	@echo "SOPS installed at $(BIN_DIR)/sops"
+
+# direnv treats a changed .envrc as untrusted and refuses to load it until it
+# is approved again. Approving all four at once means it never matters which
+# one you actually touched. direnv and age come from the OS package manager,
+# not from here — they hook the shell and hold the private key respectively,
+# so pinning them in a repo target would be the wrong place for both.
+direnv-allow:
+	@command -v direnv >/dev/null 2>&1 || { echo "❌ direnv not installed (apt-get install direnv, then hook it into your shell)"; exit 1; }
+	@command -v age >/dev/null 2>&1 || { echo "❌ age not installed (apt-get install age)"; exit 1; }
+	direnv allow .
+	direnv allow packer
+	direnv allow terraform
+	direnv allow ansible
+
 tflint-init:
 	@echo "Initializing TFLint rulesets..."
 	@$(BIN_DIR)/tflint --init
@@ -183,11 +205,12 @@ clean:
 help:
 	@echo "Usage:"
 	@echo "	 make install                Install all tools and hooks"
-	@echo "	 make install-binaries       Install Terraform, terraform-docs, Trivy, ShellCheck, TFLint"
+	@echo "	 make install-binaries       Install Terraform, terraform-docs, Trivy, ShellCheck, TFLint, SOPS"
 	@echo "	 make install-python-tools   Install Python tools from requirements.txt"
 	@echo "	 make install-node-tools     Install Node tools from package.json"
 	@echo "	 make install-lint-hooks     Install Git hooks for pre-commit and commit-msg"
 	@echo "	 make lint-all               Run pre-commit on all files"
 	@echo "	 make run-semantic-release   Run semantic-release"
+	@echo "	 make direnv-allow           Re-approve the .envrc files (root, packer, terraform, ansible)"
 	@echo "	 make tflint-init            Install TFLint rulesets"
 	@echo "	 make clean                  Remove temporary files"

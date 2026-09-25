@@ -253,6 +253,25 @@ autoinstall:
           # Improve I/O behavior (especially on SSD-backed storage)
           vm.dirty_writeback_centisecs = 1500
 
+      # Elasticsearch bootstrap requirement. ES runs a hard bootstrap check on
+      # this at startup and refuses to boot if it is too low — the container
+      # exits immediately with "max virtual memory areas vm.max_map_count [65530]
+      # is too low". It lives here, not in Ansible, so the OS is fully ready the
+      # moment a clone boots. Harmless on VMs that never run ES.
+      - path: /etc/sysctl.d/81-elasticsearch.conf
+        content: |
+          vm.max_map_count=${vm_max_map_count}
+
+      # Raise memlock + nofile for the container runtime. ES locks its heap
+      # into RAM (bootstrap.memory_lock) so the JVM heap can never be swapped
+      # out, which needs an unlimited memlock ceiling on the host.
+      - path: /etc/security/limits.d/99-elasticsearch.conf
+        content: |
+          *  soft  memlock  unlimited
+          *  hard  memlock  unlimited
+          *  soft  nofile   65536
+          *  hard  nofile   65536
+
       # Hardened SSH configuration
       - path: /etc/ssh/sshd_config.d/99-hardening.conf
         content: |
@@ -423,6 +442,13 @@ autoinstall:
 
       # Enable qemu-guest-agent
       - systemctl enable qemu-guest-agent
+
+      # Compose base directory for the Elastic Stack projects. Created here
+      # rather than by Ansible for the same reason as the sysctl above — the
+      # OS arrives ready. Must stay in sync with elastic_base_dir in
+      # ansible/inventory/group_vars/all.yml.
+      - mkdir -p ${elastic_base_dir}
+      - chmod 0755 ${elastic_base_dir}
 
       # # ===== SECURITY TOOLS CONFIGURATION =====
 

@@ -1,7 +1,7 @@
 ---
 # Attach SMB shares (TrueNAS) as Nextcloud external storage, via occ inside the
 # AIO Nextcloud container. Requires the container to be running (i.e. AIO
-# first-run setup completed). SMB credentials come from vault.
+# first-run setup completed). SMB credentials come from the environment.
 #
 # One external-storage mount is created per entry in nextcloud_aio_nas_mounts.
 # NOTE: occ files_external JSON field names (mount_id, mount_point) are stable
@@ -38,7 +38,7 @@
         loop_var: nextcloud_aio_nas_mount
         label: "{{ nextcloud_aio_nas_mount.name }}"
 
-    # Private per-user folders, derived from nextcloud_aio_users (vault) rather
+    # Private per-user folders, derived from nextcloud_aio_users rather
     # than listed above, so usernames stay out of the tracked repo. Each is
     # scoped to its owner: without applicable_users a personal folder would be
     # visible and writable to every other account. Looping over usernames only

@@ -15,6 +15,12 @@ variable "pm_api_token_secret" {
   sensitive   = true
 }
 
+variable "pm_tls_insecure" {
+  type        = bool
+  description = "Skip TLS verification against the Proxmox API. Set via TF_VAR_pm_tls_insecure from terraform/.envrc (PROXMOX_TLS_INSECURE); true is only needed when the endpoint serves a self-signed certificate."
+  default     = false
+}
+
 variable "proxmox_node" {
   type        = string
   description = "Proxmox node to deploy the VM on."
@@ -30,6 +36,7 @@ variable "proxmox_pool" {
 variable "template_name" {
   type        = string
   description = "Name of the Proxmox template to clone."
+  default     = "ubuntu-24.04-template"
 }
 
 variable "vm_name" {
@@ -77,4 +84,5 @@ variable "vm_user" {
 variable "ssh_public_key" {
   type        = string
   description = "Path to the SSH public key authorized on the VM."
+  default     = "~/.ssh/homelab-proxmox.pub"
 }

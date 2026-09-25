@@ -1,0 +1,22 @@
+---
+- name: Configure the Nextcloud host
+  hosts: nextcloud
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Assert the public domain is provided
+      ansible.builtin.assert:
+        that:
+          - nextcloud_domain is defined
+          - nextcloud_domain | length > 0
+        fail_msg: >-
+          nextcloud_domain is not set. It comes from the environment
+          (NEXTCLOUD_DOMAIN, exported by ansible/.envrc from the SOPS-encrypted
+          secrets.yaml) so the hostname stays out of the tracked repo. Set
+          nextcloud_domain with `sops secrets.yaml`, then `direnv reload`.
+          Caddy and AIO both need it.
+        quiet: true
+  roles:
+    - role: tailscale
+    - role: nextcloud_aio
+    - role: reverse_proxy

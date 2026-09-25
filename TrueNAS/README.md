@@ -202,13 +202,15 @@ the Synology NAS it previously mounted over SMB.
 | `nextcloud_aio_nas_host` | `192.168.1.214` |
 | SMB share | `media` → `/mnt/hdd-home-1/media` |
 | Subfolders attached | one per user (`hugo`, …) private read-write, `Familia` read-only for every Nextcloud account |
-| SMB user | dedicated account, credentials in `ansible/vault.yml` |
+| SMB user | dedicated account, credentials in the repo-root `secrets.yaml` |
 
 `Familia` is deliberately read-only in Nextcloud. Curating it — moving files
 from `media/hugo` into `media/Familia` — is done **here**, over SMB or the
 TrueNAS shell, where it is an instant rename inside one dataset instead of a
-byte-for-byte copy through the Nextcloud VM. Afterwards, re-index with
-`occ files:scan --all` on the VM.
+byte-for-byte copy through the Nextcloud VM. Nextcloud picks the change up
+the next time the folder is opened, since every mount has change detection on.
+After a large batch, `occ files:scan --path="/admin/files/Familia"` on the VM
+indexes it for search and Photos straight away.
 
 Shared mounts are declared in `nextcloud_aio_nas_mounts` in
 `ansible/group_vars/nextcloud.yml`; private per-user folders come from the

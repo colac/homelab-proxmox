@@ -28,8 +28,21 @@ variable "memory_mb" {
 }
 
 variable "disk0_size" {
-  type    = string
-  default = "32G"
+  type        = string
+  description = "OS disk size. Must be >= the Packer template's disk — Telmate cannot shrink a cloned disk. The 26.04 template ships 24G with LVM; only /opt and the OS live here."
+  default     = "24G"
+}
+
+variable "data_disk_size" {
+  type        = string
+  description = "Docker data disk (scsi1), mounted at /var/lib/docker by the Ansible docker_data role. This is where container data actually lives — Elasticsearch's esdata volume, Nextcloud AIO's mastercontainer volume — so it, not disk0_size, is the retention ceiling. null means no second disk."
+  default     = null
+}
+
+variable "data_disk_storage" {
+  type        = string
+  description = "Proxmox storage for the docker data disk. Defaults to proxmox_storage. Worth setting separately if the data disk should live on different backing storage than the OS disk."
+  default     = null
 }
 
 variable "proxmox_storage" {

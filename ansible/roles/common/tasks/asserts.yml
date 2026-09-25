@@ -1,0 +1,123 @@
+---
+# Preflight only — nothing here changes anything. Its job is to fail loudly and
+# early on the mistakes that otherwise surface many plays later as something
+# unrelated-looking.
+
+- name: Report the detected OS
+  ansible.builtin.debug:
+    msg: "{{ ansible_os_family }} > {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Assert the inventory carries a usable address
+  ansible.builtin.assert:
+    that:
+      - ansible_host is defined
+      - ansible_host | length > 0
+      - ansible_host != 'None'
+    fail_msg: >-
+      {{ inventory_hostname }} has no ansible_host. For a Terraform-generated
+      fragment this means the QEMU guest agent had not reported an IP yet —
+      re-run `terraform apply` in that project to regenerate it.
+    quiet: true
+
+- name: Check distribution compatibility
+  ansible.builtin.fail:
+    msg: "{{ ansible_distribution }} is not supported by these roles"
+  when: ansible_distribution not in ['Ubuntu']
+
+- name: Fail if not a supported release of Ubuntu
+  ansible.builtin.fail:
+    msg: "{{ ansible_distribution_version }} is not a supported version"
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version_compare(22.04, '<')
+
+- name: Verify Docker is installed (baked in by the Packer template)
+  ansible.builtin.command: docker --version
+  register: _common_docker_check
+  changed_when: false
+  # Read-only, so it runs under --check too — skipped, it registers no rc and
+  # the check below it would fail on a healthy host.
+  check_mode: false
+  failed_when: _common_docker_check.rc != 0
+
+- name: Verify the Docker Compose plugin is installed
+  ansible.builtin.command: docker compose version
+  register: _common_compose_check
+  changed_when: false
+  check_mode: false
+  failed_when: _common_compose_check.rc != 0
+
+# The single most likely reason a fresh VM cannot run Elasticsearch. ES runs a
+# hard bootstrap check on this and the container exits immediately if it is too
+# low, with an error that reads like an application fault rather than a missing
+# host setting. Checking it here names the real cause and the real fix.
+- name: Read vm.max_map_count
+  ansible.builtin.command: sysctl -n vm.max_map_count
+  register: _common_max_map_count
+  changed_when: false
+  # Without this, --check skips the read and the assert below reports
+  # "vm.max_map_count is ," on a host that is fine.
+  check_mode: false
+  when: "'elasticsearch' in group_names"
+
+- name: Assert vm.max_map_count is high enough for Elasticsearch
+  ansible.builtin.assert:
+    that:
+      - _common_max_map_count.stdout | int >= 262144
+    fail_msg: >-
+      vm.max_map_count is {{ _common_max_map_count.stdout }}, and Elasticsearch
+      needs at least 262144. This VM was cloned from a Packer template built
+      before the Elastic prerequisites were added. Rebuild the template
+      (cd packer/ubuntu-26.04 && packer build .) and re-clone this VM — the
+      setting is baked into the image on purpose, so Ansible does not fix it
+      here.
+    quiet: true
+  when: "'elasticsearch' in group_names"
+
+- name: Verify the Elastic Stack passwords are available
+  ansible.builtin.assert:
+    that:
+      - es_elastic_password | length > 0
+      - kibana_system_password | length > 0
+    fail_msg: >-
+      ELASTIC_PASSWORD and/or KIBANA_SYSTEM_PASSWORD resolved empty. They come
+      from the environment: set elastic_password / kibana_system_password in
+      the repo-root secrets.yaml (sops secrets.yaml), then make sure direnv has
+      loaded — `direnv reload` in ansible/, or re-approve with
+      `make direnv-allow` if you edited an .envrc.
+    quiet: true
+  when: es_security_enabled | bool
+
+- name: Verify the Kibana encryption key is available
+  ansible.builtin.assert:
+    that:
+      - kibana_encryption_key | length > 0
+    fail_msg: >-
+      fleet_server_enabled is true but KIBANA_ENCRYPTION_KEY resolved empty.
+      Generate one with `openssl rand -hex 32` and set kibana_encryption_key in
+      the repo-root secrets.yaml (sops secrets.yaml). Fleet encrypts the
+      service tokens it stores as saved objects with this key, and POST
+      /api/fleet/setup fails outright without it.
+    quiet: true
+  when: "'kibana' in group_names and (fleet_server_enabled | default(false) | bool)"
+
+# kibana_fqdn is derived from nextcloud_domain, so an unloaded environment
+# turns it into the bare "kibana." — certbot would then fail with an ACME
+# error that says nothing about direnv. The token and email are checked for
+# the same reason.
+- name: Verify what Kibana's Let's Encrypt certificate needs is available
+  ansible.builtin.assert:
+    that:
+      - nextcloud_domain | length > 0
+      - kibana_fqdn is match('^kibana\.[^.]+\..+')
+      - cloudflare_dns_api_token | length > 0
+      - acme_email | length > 0
+    fail_msg: >-
+      kibana_tls_letsencrypt is true, but kibana_fqdn resolved to
+      '{{ kibana_fqdn }}' and/or CLOUDFLARE_DNS_API_TOKEN or
+      REVERSE_PROXY_ACME_EMAIL resolved empty. All three come from the
+      environment: set nextcloud_domain, cloudflare_dns_api_token and
+      reverse_proxy_acme_email in the repo-root secrets.yaml (sops
+      secrets.yaml), then `direnv reload` in ansible/. Or set
+      kibana_tls_letsencrypt: false in group_vars/monitoring.yml to serve the
+      internal CA's certificate instead.
+    quiet: true
+  when: "'kibana' in group_names and (kibana_tls_letsencrypt | default(false) | bool)"

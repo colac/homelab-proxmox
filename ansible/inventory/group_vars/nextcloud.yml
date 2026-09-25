@@ -6,11 +6,16 @@
 # obtained via Cloudflare DNS-01 (no inbound ports opened). Reachable privately
 # only: on the LAN directly, and off-LAN over Tailscale.
 #
-# To keep the hostname out of the tracked repo, the following live in vault.yml
-# (git-ignored) rather than here — see vault.yml.example:
-#   nextcloud_domain          public hostname; MUST match AIO's submitted domain
-#   reverse_proxy_acme_email  Let's Encrypt account email (expiry notices)
-#   cloudflare_dns_api_token  Cloudflare token, Zone:DNS:Edit on your zone
+# Secrets and the public hostname come from the environment, not from this
+# file: the repo-root secrets.yaml is SOPS-encrypted, direnv decrypts it and
+# ansible/.envrc exports the variables read below. See secrets.yaml.example
+# for every key and what it is for.
+#
+# nextcloud_domain, acme_email and cloudflare_dns_api_token are defined in
+# group_vars/all.yml — the monitoring host needs them too (Kibana's
+# certificate uses the same zone and token), and group_vars for a group a host
+# is not in are invisible.
+reverse_proxy_acme_email: "{{ acme_email }}"
 
 # ===========================================================================
 # Nextcloud AIO (All-in-One) — reverse-proxy mode behind Caddy
@@ -41,10 +46,10 @@ nextcloud_aio_extra_env: {}
 # Tailscale
 # ===========================================================================
 
-# Auth key to join the tailnet non-interactively. LEAVE EMPTY to skip
-# `tailscale up` (then authenticate manually later and re-run this playbook).
-# Provide securely, e.g.: --extra-vars "tailscale_authkey=tskey-auth-xxxx"
-tailscale_authkey: "{{ tailscale_authkey }}"
+# Auth key to join the tailnet non-interactively, from secrets.yaml via
+# ansible/.envrc. Leave it empty there to skip `tailscale up` and authenticate
+# by hand later, then re-run this playbook.
+tailscale_authkey: "{{ lookup('env', 'TAILSCALE_AUTHKEY') }}"
 
 # MagicDNS hostname the node registers as (the .ts.net name; not user-facing —
 # access is via nextcloud_domain above).
@@ -61,25 +66,27 @@ tailscale_up_extra_args: "--ssh"
 # TrueNAS — SMB external storage
 # ===========================================================================
 # Runs after AIO first-run setup (the Nextcloud container must be up). The SMB
-# user and password live in vault.yml (git-ignored), never here.
+# credentials come from the environment (secrets.yaml -> ansible/.envrc),
+# never from this tracked file.
 nextcloud_aio_nas_enabled: true
 # Shared SMB connection defaults, applied to every mount below.
 # TrueNAS IP. SMB is on :445.
 nextcloud_aio_nas_host: "192.168.1.214"
 nextcloud_aio_nas_domain: "WORKGROUP"
-# nextcloud_aio_nas_user + nextcloud_aio_nas_password -> vault.yml
+nextcloud_aio_nas_user: "{{ lookup('env', 'NEXTCLOUD_NAS_USER') }}"
+nextcloud_aio_nas_password: "{{ lookup('env', 'NEXTCLOUD_NAS_PASSWORD') }}"
 
 # Share that per-user private folders come from. A user in nextcloud_aio_users
-# (vault.yml) with `nas_folder: true` gets <share>/<username> mounted as
-# /<username>, visible and writable only to that account — so personal folders
-# need no entry below and no username appears in the tracked repo.
+# with `nas_folder: true` gets <share>/<username> mounted as /<username>,
+# visible and writable only to that account — so personal folders need no
+# entry below and no username appears in the tracked repo.
 nextcloud_aio_nas_personal_share: "media"
 
 # Shared mounts, one entry per folder. `name` is the folder shown in
 # Nextcloud's Files; `share` is the SMB share (TrueNAS exposes a single "media"
 # share, /mnt/hdd-home-1/media, with subfolders inside it). Mounts are global
 # (all users) unless `applicable_users` is set. All use the shared
-# nas_user/nas_password from vault unless overridden.
+# nas_user/nas_password above unless overridden.
 nextcloud_aio_nas_mounts:
   # Familia holds curated family photos/videos — critical data, so it is
   # mounted READ-ONLY for every Nextcloud account, admin included. Nextcloud
@@ -98,7 +105,12 @@ nextcloud_aio_nas_mounts:
 # ===========================================================================
 # Nextcloud users (beyond the AIO admin account)
 # ===========================================================================
-# Defined in vault.yml as nextcloud_aio_users — usernames and passwords are
-# kept out of the tracked repo together. Each entry may set `nas_folder: true`
-# to also get a private folder from nextcloud_aio_nas_personal_share above.
-# See vault.yml.example for the format.
+# Usernames and passwords travel together in secrets.yaml as
+# nextcloud_users_json, so neither is in the tracked repo. It is a single-line
+# JSON array rather than nested YAML because `sops -d --output-type dotenv`
+# emits flat key=value pairs only — the structure is restored here.
+#
+# Each entry: name (required), password (required), display_name (optional),
+# nas_folder (optional; true also attaches a private folder from
+# nextcloud_aio_nas_personal_share above). See secrets.yaml.example.
+nextcloud_aio_users: "{{ lookup('env', 'NEXTCLOUD_USERS_JSON') | default('[]', true) | from_json }}"

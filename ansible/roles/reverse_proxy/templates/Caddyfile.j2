@@ -8,6 +8,6 @@
 {{ nextcloud_domain }} {
 	reverse_proxy {{ reverse_proxy_upstream_host }}:{{ reverse_proxy_upstream_port }}
 	tls {
-		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		dns cloudflare {env.cloudflare_dns_api_token}
 	}
 }

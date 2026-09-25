@@ -1,0 +1,68 @@
+# ============================================================================
+# OPTIONAL overrides for the Ubuntu 26.04 template build.
+#
+# You normally need NO var-file at all. Everything credential-shaped arrives as
+# PKR_VAR_* environment variables from packer/.envrc, which direnv fills by
+# decrypting the repo-root secrets.yaml (SOPS + age):
+#
+#   PKR_VAR_proxmox_api_url           <- proxmox_endpoint + /api2/json
+#   PKR_VAR_proxmox_api_token_id      <- proxmox_packer_token_id
+#   PKR_VAR_proxmox_api_token_secret  <- proxmox_packer_token_secret
+#   PKR_VAR_proxmox_node              <- PROXMOX_NODE
+#   PKR_VAR_proxmox_skip_tls_verify   <- PROXMOX_TLS_INSECURE
+#   PKR_VAR_password_hash             <- packer_password_hash
+#   PKR_VAR_ssh_authorized_keys       <- ~/.ssh/homelab-proxmox.pub, read at load
+#   PKR_VAR_http_interface            <- PACKER_HTTP_INTERFACE (.envrc.local)
+#
+# So the build is just:
+#
+#   cd packer/ubuntu-26.04
+#   packer init .
+#   packer validate .
+#   packer build .
+#
+# Copy this file to variables.pkrvars.hcl only if you want to pin a non-default
+# value below, then pass -var-file=variables.pkrvars.hcl. A var-file takes
+# precedence over PKR_VAR_*, so anything you set here wins. That file is
+# git-ignored (*.pkrvars.hcl) — never put a credential in this .example.
+# ============================================================================
+
+# --- Source ISO (must already exist in Proxmox storage) ---------------------
+# boot_iso_file = "local:iso/ubuntu-26.04.1-live-server-amd64.iso"
+
+# --- Template identity ------------------------------------------------------
+# 9001 keeps this template alongside the 24.04 one at 9000. Proxmox rejects a
+# build onto an existing vm_id, so reusing 9000 fails rather than overwrites.
+# vm_id   = 9001
+# vm_name = "ubuntu-26.04-template"
+
+# --- Default user -----------------------------------------------------------
+# username = "ubuntu"
+
+# --- SSH --------------------------------------------------------------------
+# Path to the private half of the deploy key Packer connects with. The key
+# itself stays in ~/.ssh and is never committed.
+# ssh_private_key_file = "~/.ssh/homelab-proxmox"
+
+# --- Autoinstall boot command -----------------------------------------------
+# Only needed if the 26.04 ISO's GRUB menu moves the linux line and the build
+# stalls at the installer prompt instead of fetching user-data. Count the
+# <down>s to the linux line on the ISO you uploaded and set them here.
+# boot_command = [
+#   "<esc><wait>",
+#   "e<wait>",
+#   "<down><down><down><end>",
+#   "<bs><bs><bs><bs><wait>",
+#   "autoinstall ds=nocloud-net\\;s=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ ---<wait>",
+#   "<f10><wait>",
+# ]
+
+# --- Sizing and features (defaults are in variables.pkr.hcl) -----------------
+# storage_pool      = "local-lvm"
+# network_bridge    = "vmbr0"
+# disk_size         = "32G"
+# vm_cpu_cores      = 2
+# vm_memory         = 4096
+# install_docker    = true
+# install_tailscale = true
+# enable_proxy      = false
