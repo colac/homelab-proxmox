@@ -136,24 +136,25 @@ build {
 
   # -----------------------
   # Run provisioning scripts (as root) — environment variables exported here
-  # Keep execution order deterministic: proxy -> docker -> alloy
+  # Keep execution order deterministic: proxy -> docker -> elastic-agent
   # -----------------------
   provisioner "shell" {
     environment_vars = [
       "INSTALL_DOCKER=${var.install_docker}",
       "INSTALL_TAILSCALE=${var.install_tailscale}",
+      "ELASTIC_AGENT_VERSION=${var.elastic_agent_version}",
       "ENABLE_PROXY=${var.enable_proxy}",
       "HTTP_PROXY=${var.http_proxy}",
       "HTTPS_PROXY=${var.https_proxy}",
       "NO_PROXY=${var.no_proxy}",
     ]
     execute_command = "sudo -E bash '{{ .Path }}'"
-    # Keep execution order deterministic: proxy -> ca -> docker -> alloy -> tailscale
+    # Keep execution order deterministic: proxy -> ca -> docker -> elastic-agent -> tailscale
     scripts = [
       "${path.root}/scripts/00-configure-proxy.sh",
       "${path.root}/scripts/10-install-custom-ca.sh",
       "${path.root}/scripts/20-install-docker.sh",
-      "${path.root}/scripts/30-install-alloy.sh",
+      "${path.root}/scripts/30-install-elastic-agent.sh",
       "${path.root}/scripts/40-install-tailscale.sh"
     ]
   }

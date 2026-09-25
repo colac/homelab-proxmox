@@ -1,10 +1,10 @@
 ---
 - name: Fail early if the Cloudflare API token is missing
   ansible.builtin.assert:
-    that: reverse_proxy_cloudflare_api_token | length > 0
+    that: reverse_proxy_cloudflare_dns_api_token | length > 0
     fail_msg: >-
-      reverse_proxy_cloudflare_api_token is empty. Put cloudflare_dns_api_token
-      in vault.yml — a Cloudflare token with Zone:DNS:Edit on the domain's zone.
+      reverse_proxy_cloudflare_dns_api_token is empty. Put cloudflare_dns_api_token
+      in secrets.yaml — a Cloudflare token with Zone:DNS:Edit on that zone.
     quiet: true
 
 - name: Ensure Docker is running and enabled
@@ -41,7 +41,7 @@
 
 - name: Write the Cloudflare API token env file
   ansible.builtin.copy:
-    content: "CLOUDFLARE_API_TOKEN={{ reverse_proxy_cloudflare_api_token }}\n"
+    content: "cloudflare_dns_api_token={{ reverse_proxy_cloudflare_dns_api_token }}\n"
     dest: "{{ reverse_proxy_dir }}/.env"
     owner: root
     group: root

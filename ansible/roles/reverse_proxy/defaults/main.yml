@@ -13,5 +13,5 @@ reverse_proxy_upstream_port: 11000
 reverse_proxy_acme_email: ""
 
 # Cloudflare API token for the ACME DNS-01 challenge (Zone:DNS:Edit on the
-# domain's zone). Provide via vault.yml as cloudflare_dns_api_token.
-reverse_proxy_cloudflare_api_token: "{{ cloudflare_dns_api_token | default('') }}"
+# domain's zone). Provide as cloudflare_dns_api_token in secrets.yaml.
+reverse_proxy_cloudflare_dns_api_token: "{{ cloudflare_dns_api_token | default('') }}"

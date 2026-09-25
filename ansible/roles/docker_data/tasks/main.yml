@@ -1,0 +1,268 @@
+---
+# tasks file for docker_data — LVM on the Terraform-attached data disk,
+# mounted at /var/lib/docker.
+#
+# Three states this has to handle, and it must tell them apart before writing
+# anything:
+#
+#   raw disk        pvcreate -> vgcreate -> lvcreate -> mkfs -> seed -> mount
+#   already ours    LVM PV carrying docker_data_vg: adopt it, never reformat.
+#                   This is the path taken when a populated disk is detached
+#                   from one VM and attached to another.
+#   anything else   refuse. A partition table or a foreign filesystem means
+#                   the device variable is wrong, and pvcreate would destroy
+#                   whatever is there.
+
+- name: Check whether a docker data device is attached
+  ansible.builtin.stat:
+    path: "{{ docker_data_device }}"
+  register: _docker_data_device
+
+- name: Report that no docker data disk is attached
+  ansible.builtin.debug:
+    msg: >-
+      {{ docker_data_device }} is not present, so {{ inventory_hostname }}
+      keeps /var/lib/docker on the OS disk. Attach one by setting
+      data_disk_size in this host's Terraform project and re-applying.
+  when: not _docker_data_device.stat.exists
+
+- name: Configure the docker data disk
+  when:
+    - docker_data_enabled | bool
+    - _docker_data_device.stat.exists
+  block:
+
+    # ---------------------------------------------------------------------
+    # Identify what is on the device before touching it
+    # ---------------------------------------------------------------------
+    - name: Read the on-disk signature of the data device
+      # blkid exits 2 on a device with no signature at all, which is the
+      # normal "fresh disk" case, so a non-zero rc is not an error here.
+      ansible.builtin.command:
+        cmd: "blkid -p -o value -s TYPE {{ docker_data_device }}"
+      register: _docker_data_signature
+      changed_when: false
+      # Every read in this role runs under --check as well: skipped, it would
+      # register nothing, and the safety asserts that follow would judge an
+      # empty result instead of the real disk.
+      check_mode: false
+      failed_when: false
+
+    - name: Refuse to overwrite a device that is not blank or an LVM member
+      ansible.builtin.assert:
+        that:
+          - _docker_data_signature.stdout | trim in ['', 'LVM2_member']
+        fail_msg: >-
+          {{ docker_data_device }} carries a
+          '{{ _docker_data_signature.stdout | trim }}' signature, which is
+          neither blank nor an LVM physical volume. Refusing to run pvcreate
+          over it. Either docker_data_device points at the wrong disk, or this
+          disk holds something that has to be moved off by hand first.
+        quiet: true
+
+    - name: Read the volume group already present on the data device
+      ansible.builtin.command:
+        cmd: "pvs --noheadings --readonly -o vg_name {{ docker_data_device }}"
+      register: _docker_data_existing_vg
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: _docker_data_signature.stdout | trim == 'LVM2_member'
+
+    - name: Refuse to adopt a physical volume belonging to another volume group
+      ansible.builtin.assert:
+        that:
+          - _docker_data_existing_vg.stdout | trim in ['', docker_data_vg]
+        fail_msg: >-
+          {{ docker_data_device }} is already a physical volume in volume
+          group '{{ _docker_data_existing_vg.stdout | trim }}', not
+          '{{ docker_data_vg }}'. If this disk was moved from another host,
+          rename its group first — `vgrename <vg-uuid> {{ docker_data_vg }}`,
+          using the UUID from `vgs -o vg_name,vg_uuid` — then re-run. Renaming
+          by UUID matters when both groups share a name.
+        quiet: true
+      when: _docker_data_signature.stdout | trim == 'LVM2_member'
+
+    # A dry run cannot get further than this on a blank disk: under --check,
+    # lvg only reports that it *would* create the volume group, so lvol then
+    # fails looking for a group that does not exist. Everything that guards
+    # the disk has already run by this point, which is what a dry run is for.
+    - name: Report where a dry run on a blank disk stops
+      ansible.builtin.debug:
+        msg: >-
+          {{ docker_data_device }} is blank, so a real run will create
+          {{ docker_data_vg }}/{{ docker_data_lv }} on it and mount it at
+          {{ docker_data_mount_path }}. --check cannot simulate past volume
+          group creation, so the dry run for this host ends here.
+      when: ansible_check_mode and (_docker_data_signature.stdout | trim) == ''
+
+    - name: End the dry run on a blank disk
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode and (_docker_data_signature.stdout | trim) == ''
+
+    # ---------------------------------------------------------------------
+    # Create or extend the LVM stack
+    # ---------------------------------------------------------------------
+    - name: Ensure the volume group spans the data device
+      community.general.lvg:
+        vg: "{{ docker_data_vg }}"
+        pvs: "{{ docker_data_device }}"
+        state: present
+
+    - name: Ensure the logical volume exists and fills the volume group
+      # resizefs grows the filesystem after the LV grows, so enlarging the
+      # Proxmox disk and re-running this role is the whole growth path.
+      # shrink: false makes a smaller size a no-op rather than data loss.
+      community.general.lvol:
+        vg: "{{ docker_data_vg }}"
+        lv: "{{ docker_data_lv }}"
+        size: "{{ docker_data_lv_size }}"
+        resizefs: true
+        shrink: false
+        state: present
+
+    - name: Ensure the filesystem exists on the logical volume
+      # force is left at its default of false, so an adopted volume that
+      # already carries a filesystem is never reformatted.
+      community.general.filesystem:
+        dev: "/dev/{{ docker_data_vg }}/{{ docker_data_lv }}"
+        fstype: "{{ docker_data_fstype }}"
+
+    # ---------------------------------------------------------------------
+    # Seed a brand-new filesystem from whatever /var/lib/docker already holds
+    # ---------------------------------------------------------------------
+    - name: Check whether the data volume is already mounted at its final path
+      ansible.builtin.command:
+        cmd: "findmnt --noheadings --output SOURCE --target {{ docker_data_mount_path }}"
+      register: _docker_data_current_mount
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Seed the data volume from the existing /var/lib/docker
+      when: >-
+        docker_data_lv not in (_docker_data_current_mount.stdout | default(''))
+      block:
+        - name: Create the temporary seed mount point
+          ansible.builtin.file:
+            path: "{{ docker_data_seed_mount }}"
+            state: directory
+            mode: "0755"
+
+        - name: Mount the data volume at the seed point
+          ansible.posix.mount:
+            path: "{{ docker_data_seed_mount }}"
+            src: "/dev/{{ docker_data_vg }}/{{ docker_data_lv }}"
+            fstype: "{{ docker_data_fstype }}"
+            state: mounted
+            # ephemeral: this must never reach /etc/fstab
+            fstab: /tmp/docker_data_seed.fstab
+
+        - name: Look for existing content on the data volume
+          ansible.builtin.find:
+            paths: "{{ docker_data_seed_mount }}"
+            excludes: "lost+found"
+            file_type: any
+            hidden: true
+          register: _docker_data_volume_content
+
+        - name: Look for existing content in /var/lib/docker
+          ansible.builtin.find:
+            paths: "{{ docker_data_mount_path }}"
+            file_type: any
+            hidden: true
+          register: _docker_data_local_content
+
+        # Only a volume that is genuinely empty gets seeded. A disk carrying
+        # another host's containers must be adopted untouched — copying the
+        # local /var/lib/docker over it would destroy exactly the data the
+        # move was meant to preserve.
+        - name: Stop Docker before copying its state
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+          loop:
+            - docker.service
+            # The socket unit restarts docker.service on demand, so stopping
+            # the service alone is not enough to keep /var/lib/docker quiet.
+            - docker.socket
+          when:
+            - _docker_data_volume_content.matched == 0
+            - _docker_data_local_content.matched > 0
+
+        # rsync -aHAX, not synchronize's `archive: true` (-rlptgoD) and not
+        # cp -a. Docker's overlay2 store leans on hardlinks between layers and
+        # on trusted.overlay.* extended attributes; a copy that drops -H
+        # duplicates every shared file, and one that drops -X produces layers
+        # the driver cannot read. --numeric-ids keeps ownership correct if the
+        # volume is ever mounted on a host with different passwd entries.
+        #
+        # noqa command-instead-of-module: ansible-lint wants
+        # ansible.posix.synchronize here. That module is built for control-node
+        # to target transfers over SSH; this is a copy between two paths on the
+        # same host, and its `archive` option cannot express -H/-A/-X without
+        # dropping to rsync_opts anyway. Calling rsync directly is clearer.
+        - name: Copy the existing Docker state onto the data volume # noqa: command-instead-of-module
+          ansible.builtin.command:
+            cmd: >-
+              rsync -aHAX --numeric-ids
+              {{ docker_data_mount_path }}/
+              {{ docker_data_seed_mount }}/
+          changed_when: true
+          when:
+            - _docker_data_volume_content.matched == 0
+            - _docker_data_local_content.matched > 0
+
+        - name: Unmount the seed point
+          ansible.posix.mount:
+            path: "{{ docker_data_seed_mount }}"
+            state: unmounted
+            fstab: /tmp/docker_data_seed.fstab
+
+        - name: Remove the temporary seed mount point
+          ansible.builtin.file:
+            path: "{{ docker_data_seed_mount }}"
+            state: absent
+
+    # ---------------------------------------------------------------------
+    # Mount it for real
+    #
+    # Note: whatever /var/lib/docker held before is still on the OS disk,
+    # shadowed by this mount, and still occupying space in ubuntu-vg/root. On
+    # a freshly built VM that is a few MB and not worth chasing. To reclaim it
+    # on a host that had already pulled images:
+    #   mkdir /mnt/root && mount -o bind / /mnt/root
+    #   rm -rf /mnt/root/var/lib/docker/*   # verify the path first
+    #   umount /mnt/root
+    # Left manual on purpose — it deletes data underneath a live mount.
+    # ---------------------------------------------------------------------
+    - name: Read the filesystem UUID of the data volume
+      ansible.builtin.command:
+        cmd: "blkid -o value -s UUID /dev/{{ docker_data_vg }}/{{ docker_data_lv }}"
+      register: _docker_data_fs_uuid
+      changed_when: false
+      # Not forced to run under --check: on a blank disk the LV does not exist
+      # yet in a dry run, so there is no UUID to read. The mount below is
+      # skipped in that case instead.
+
+    - name: Mount the data volume at /var/lib/docker
+      # By UUID rather than /dev/sdb: the device name depends on enumeration
+      # order, which changes the moment this disk is attached to a host that
+      # has a different number of disks.
+      ansible.posix.mount:
+        path: "{{ docker_data_mount_path }}"
+        src: "UUID={{ _docker_data_fs_uuid.stdout | trim }}"
+        fstype: "{{ docker_data_fstype }}"
+        opts: "{{ docker_data_mount_opts }}"
+        state: mounted
+      notify: Start docker
+      when: _docker_data_fs_uuid.stdout is defined
+
+    - name: Ensure Docker is running on the new mount
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - docker.socket
+        - docker.service

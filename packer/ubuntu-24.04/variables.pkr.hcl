@@ -159,7 +159,9 @@ variable "password" {
 variable "password_hash" {
   type        = string
   description = <<EOT
-Default user password hashed. Use
+Console-login password hash for the default user (SSH is key-only; this is the
+tty/serial fallback). Supplied as PKR_VAR_password_hash by packer/.envrc, from
+packer_password_hash in the SOPS-encrypted secrets.yaml. Generate with:
 $ mkpasswd -m sha-512 '<yourpassword>'
 EOT
   sensitive   = true
@@ -246,8 +248,9 @@ variable "packages" {
 # SSH Configuration
 variable "ssh_private_key_file" {
   type        = string
-  description = "Private key file to use for SSH."
+  description = "Private key file to use for SSH during the build. Path only — the key itself stays in ~/.ssh and never enters the repo."
   sensitive   = true
+  default     = "~/.ssh/homelab-proxmox"
 }
 
 variable "ssh_timeout" {
@@ -256,7 +259,9 @@ variable "ssh_timeout" {
   default     = "20m"
 }
 
-# SSH Keys for Default user
+# SSH Keys for Default user. Password auth is disabled in the image, so if this
+# is empty nobody — Packer included — can ever log in to the built template.
+# packer/.envrc fills it from ~/.ssh/homelab-proxmox.pub at direnv load time.
 variable "ssh_authorized_keys" {
   type        = list(string)
   description = "SSH authorized keys for default user"
@@ -342,4 +347,28 @@ variable "no_proxy" {
   type        = string
   description = "Comma-separated list of domains or IPs to exclude from proxy"
   default     = "localhost,127.0.0.1"
+}
+
+# Elastic Stack OS prerequisites
+#
+# Baked into the image rather than applied by Ansible, matching how the
+# Elastic repo's template does it: a clone arrives ready to run
+# Elasticsearch, and Ansible has zero involvement in OS configuration.
+# Changing either of these means rebuilding the template.
+variable "vm_max_map_count" {
+  type        = number
+  description = "vm.max_map_count sysctl. Elasticsearch runs a hard bootstrap check on this and refuses to start below 262144."
+  default     = 262144
+}
+
+variable "elastic_base_dir" {
+  type        = string
+  description = "Base directory for the Elastic Stack compose projects. Must match elastic_base_dir in ansible/inventory/group_vars/all.yml."
+  default     = "/opt/elastic"
+}
+
+variable "elastic_agent_version" {
+  type        = string
+  description = "Elastic Agent version pre-installed (and left disabled) in the template. Should match stack_version in ansible/inventory/group_vars/all.yml; the elastic_agent role reinstalls if they drift."
+  default     = "9.4.2"
 }

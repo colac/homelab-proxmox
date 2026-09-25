@@ -1,7 +1,7 @@
 ---
 # Create Nextcloud users via occ, idempotent. Requires the container to be
-# running (i.e. AIO first-run setup completed). Passwords come from vault via
-# nextcloud_aio_users[].password.
+# running (i.e. AIO first-run setup completed). Passwords come from the
+# environment, via nextcloud_aio_users[].password.
 
 - name: Check the Nextcloud AIO app container is running
   ansible.builtin.command: docker exec nextcloud-aio-nextcloud true

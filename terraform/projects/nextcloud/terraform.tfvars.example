@@ -1,13 +1,14 @@
 # ----------------------------------------------------------------------------
-# Example tfvars for the Nextcloud VM project.
-# Copy to terraform.tfvars and fill in the secrets (terraform.tfvars is
-# git-ignored via *.tfvars).
+# OPTIONAL overrides for the nextcloud project. Copy to terraform.tfvars only if
+# you need to change something — every variable below already has a default in
+# variables.tf, so `terraform apply` works with no tfvars file at all.
+#
+# The Proxmox endpoint and API token are deliberately NOT here. They arrive as
+# TF_VAR_pm_api_url / TF_VAR_pm_api_token_id / TF_VAR_pm_api_token_secret from
+# terraform/.envrc, which direnv fills by decrypting the repo-root secrets.yaml
+# (SOPS + age). That keeps every credential out of the working tree, which is
+# why *.tfvars is git-ignored and this .example carries no secrets.
 # ----------------------------------------------------------------------------
-
-# Proxmox API connection
-pm_api_url          = "https://pve.example.com:8006/api2/json"
-pm_api_token_id     = "terraform@pve!terraform-automation"
-pm_api_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 # Where to place the VM
 proxmox_node    = "pve"

@@ -28,11 +28,32 @@ resource "proxmox_vm_qemu" "ubuntu_vm" {
     scsi {
       scsi0 {
         disk {
-          # size must be >= the template's disk (60G) — Telmate cannot shrink a
+          # size must be >= the template's OS disk — Telmate cannot shrink a
           # cloned disk and will otherwise create a new empty one. No `format`
           # on local-lvm (LVM-thin is block storage, raw is implied).
           size    = var.disk0_size
           storage = var.proxmox_storage
+        }
+      }
+
+      # Docker data disk. Absent unless the project asks for one, so a VM that
+      # exists to *receive* an already-populated disk can be created without a
+      # docker-vg of its own and import the other one cleanly.
+      #
+      # This disk is created raw and stays raw as far as Proxmox is concerned.
+      # The Ansible `docker_data` role does pvcreate/vgcreate/lvcreate/mkfs on
+      # first run and mounts it at /var/lib/docker; on a disk that already
+      # carries a docker-vg it adopts what is there instead. Keeping it out of
+      # the Packer template is what gives each VM its own LVM UUIDs — a full
+      # clone would copy them byte-for-byte and make the disk unmovable without
+      # vgimportclone.
+      dynamic "scsi1" {
+        for_each = var.data_disk_size == null ? [] : [var.data_disk_size]
+        content {
+          disk {
+            size    = scsi1.value
+            storage = coalesce(var.data_disk_storage, var.proxmox_storage)
+          }
         }
       }
     }

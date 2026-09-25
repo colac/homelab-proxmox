@@ -1,0 +1,46 @@
+---
+# defaults file for docker_data
+#
+# Puts /var/lib/docker on the second disk Terraform attaches (scsi1), managed
+# with LVM so it can be grown later without repartitioning.
+#
+# This matters more than a generic "data disk" would suggest: every service in
+# this repo keeps its state in *named Docker volumes*, not bind mounts —
+# Elasticsearch's `esdata`, Nextcloud AIO's `nextcloud_aio_mastercontainer`,
+# Caddy's `nextcloud_caddy_data`. All of those live under
+# /var/lib/docker/volumes, so this disk, not disk0, is what actually caps how
+# much data a host can hold.
+#
+# Deliberately NOT done in Packer. A full clone copies LVM metadata verbatim,
+# so a data disk partitioned in the golden image would give every VM a
+# byte-identical PV and VG UUID, and moving one host's disk to another would
+# need `vgimportclone` before LVM would touch it. Creating the VG here means
+# each host generates its own UUIDs at first run.
+
+docker_data_enabled: true
+
+# scsi0 is the OS disk, scsi1 is this one. The role refuses to touch a device
+# that carries any signature other than an LVM PV, so a wrong value here fails
+# loudly rather than eating a disk.
+docker_data_device: /dev/sdb
+
+docker_data_vg: docker-vg
+docker_data_lv: docker-lv
+
+# 100%FREE is right for a single-purpose data disk: growing it means growing
+# the Proxmox disk, then `pvresize` + re-running this role, which extends the
+# LV and the filesystem in place. (Contrast the OS disk, where the Packer
+# template leaves free extents in ubuntu-vg on purpose.)
+docker_data_lv_size: 100%FREE
+docker_data_fstype: ext4
+
+docker_data_mount_path: /var/lib/docker
+
+# nofail is load-bearing, not boilerplate. Detaching this disk to move it to
+# another VM must not leave the original host unbootable waiting on a mount
+# that will never appear.
+docker_data_mount_opts: defaults,noatime,nofail
+
+# Temporary mount point used only while seeding a freshly created filesystem
+# with whatever /var/lib/docker already held.
+docker_data_seed_mount: /mnt/docker-data-seed

@@ -36,17 +36,19 @@ No resources.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_cpu_cores"></a> [cpu\_cores](#input\_cpu\_cores) | n/a | `number` | `2` | no |
-| <a name="input_disk0_size"></a> [disk0\_size](#input\_disk0\_size) | n/a | `string` | `"32G"` | no |
+| <a name="input_data_disk_size"></a> [data\_disk\_size](#input\_data\_disk\_size) | Docker data disk, mounted at /var/lib/docker. | `string` | `"12G"` | no |
+| <a name="input_disk0_size"></a> [disk0\_size](#input\_disk0\_size) | OS disk size. Must be >= the Packer template's disk — Telmate cannot shrink a cloned disk. | `string` | `"24G"` | no |
 | <a name="input_memory_mb"></a> [memory\_mb](#input\_memory\_mb) | n/a | `number` | `8192` | no |
 | <a name="input_network_bridge"></a> [network\_bridge](#input\_network\_bridge) | n/a | `string` | `"vmbr0"` | no |
 | <a name="input_pm_api_token_id"></a> [pm\_api\_token\_id](#input\_pm\_api\_token\_id) | This is an API token you have previously created for a specific user. | `string` | n/a | yes |
 | <a name="input_pm_api_token_secret"></a> [pm\_api\_token\_secret](#input\_pm\_api\_token\_secret) | This uuid is only available when the token was initially created. | `string` | n/a | yes |
 | <a name="input_pm_api_url"></a> [pm\_api\_url](#input\_pm\_api\_url) | This is the target Proxmox API endpoint. | `string` | n/a | yes |
+| <a name="input_pm_tls_insecure"></a> [pm\_tls\_insecure](#input\_pm\_tls\_insecure) | Skip TLS verification against the Proxmox API. Set via TF\_VAR\_pm\_tls\_insecure from terraform/.envrc (PROXMOX\_TLS\_INSECURE); true is only needed when the endpoint serves a self-signed certificate. | `bool` | `false` | no |
 | <a name="input_proxmox_node"></a> [proxmox\_node](#input\_proxmox\_node) | n/a | `string` | `"pve"` | no |
 | <a name="input_proxmox_pool"></a> [proxmox\_pool](#input\_proxmox\_pool) | n/a | `string` | `null` | no |
 | <a name="input_proxmox_storage"></a> [proxmox\_storage](#input\_proxmox\_storage) | n/a | `string` | `"local-lvm"` | no |
-| <a name="input_ssh_public_key"></a> [ssh\_public\_key](#input\_ssh\_public\_key) | Path to SSH public key | `string` | n/a | yes |
-| <a name="input_template_name"></a> [template\_name](#input\_template\_name) | Name of the Proxmox template to clone | `string` | n/a | yes |
+| <a name="input_ssh_public_key"></a> [ssh\_public\_key](#input\_ssh\_public\_key) | Path to SSH public key | `string` | `"~/.ssh/homelab-proxmox.pub"` | no |
+| <a name="input_template_name"></a> [template\_name](#input\_template\_name) | Name of the Proxmox template to clone | `string` | `"ubuntu-26.04-template"` | no |
 | <a name="input_vm_name"></a> [vm\_name](#input\_vm\_name) | n/a | `string` | n/a | yes |
 | <a name="input_vm_user"></a> [vm\_user](#input\_vm\_user) | n/a | `string` | `"ubuntu"` | no |
 
