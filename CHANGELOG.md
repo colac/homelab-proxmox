@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/colac/homelab-proxmox/compare/v1.2.0...v1.3.0) (2026-09-25)
+
+
+### Features
+
+* single-VM Elastic monitoring stack, SOPS secrets, Ubuntu 26.04 template ([d60dfa9](https://github.com/colac/homelab-proxmox/commit/d60dfa9e340e6a3dbca0f652da2c17f8d8917df9))
+
 # [1.2.0](https://github.com/colac/homelab-proxmox/compare/v1.1.0...v1.2.0) (2026-08-02)
 
 
