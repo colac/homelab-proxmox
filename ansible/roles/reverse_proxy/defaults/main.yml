@@ -5,6 +5,14 @@
 # Where the Caddy compose project lives on the VM.
 reverse_proxy_dir: /opt/nextcloud-caddy
 
+# Pinned, not `caddy:2`: the image is built on the VM, and a floating tag
+# meant each rebuild silently picked up whatever Caddy and plugin were current.
+# Bumping either value changes the rendered Dockerfile, which triggers the
+# rebuild. Keep the builder and runtime on the same version (one variable).
+# Tags: hub.docker.com/_/caddy and github.com/caddy-dns/cloudflare/tags.
+reverse_proxy_caddy_version: "2.11.4"
+reverse_proxy_caddy_dns_cloudflare_version: "v0.2.4"
+
 # Upstream: AIO's Apache container (reverse-proxy mode, localhost-bound).
 reverse_proxy_upstream_host: 127.0.0.1
 reverse_proxy_upstream_port: 11000

@@ -315,6 +315,35 @@ Three caveats worth knowing:
 
   Deleting a mount only detaches it — it does not touch the files on the NAS.
 
+## Updating the containers
+
+Two images, updated two different ways.
+
+**Caddy is pinned in the repo.** `reverse_proxy_caddy_version` and
+`reverse_proxy_caddy_dns_cloudflare_version` in
+`ansible/roles/reverse_proxy/defaults/main.yml` (tags:
+[caddy](https://hub.docker.com/_/caddy),
+[caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare/tags)). Bump
+them, then:
+
+```bash
+ansible-playbook playbooks/10-nextcloud.yml --limit nextcloud-vm
+# on the VM: the rebuild recreates Caddy, a few seconds without HTTPS
+docker exec nextcloud-caddy caddy version
+docker exec nextcloud-caddy caddy list-modules | grep cloudflare
+sudo docker image prune -f && sudo docker builder prune -f   # old image + Go build cache
+```
+
+**AIO updates itself; the repo stays on `nextcloud/all-in-one:latest`.** AIO
+supports only `latest` (or `beta`) for the mastercontainer, which then pins
+and updates every Nextcloud container it manages. Pinning it in the repo would
+break that. To update, open the AIO interface
+(`ssh -L 8080:localhost:8080 ubuntu@<vm>`, then `https://localhost:8080`):
+if it offers a mastercontainer update, take it first, then
+**Stop containers** → **Start and update containers**. Nextcloud is down for a
+few minutes. Enabling daily backups with automatic updates in the same
+interface makes this unattended.
+
 ## Backup and disaster recovery
 
 ### What protects what
