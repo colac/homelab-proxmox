@@ -278,6 +278,7 @@ Verify on the VM before continuing:
 
 ```bash
 findmnt /var/lib/docker          # /dev/mapper/docker--vg-docker--lv, ext4
+findmnt /var/lib/containerd      # same LV, [/containerd-root] — images off the OS disk
 vgs                              # ubuntu-vg AND docker-vg
 df -h /var/lib/docker            # ~100G
 docker info | grep -i 'Root Dir'

@@ -9,7 +9,8 @@
 # Elasticsearch's `esdata`, Nextcloud AIO's `nextcloud_aio_mastercontainer`,
 # Caddy's `nextcloud_caddy_data`. All of those live under
 # /var/lib/docker/volumes, so this disk, not disk0, is what actually caps how
-# much data a host can hold.
+# much data a host can hold. Images are here too: containerd's root is
+# bind-mounted from this disk (see docker_data_containerd_source).
 #
 # Deliberately NOT done in Packer. A full clone copies LVM metadata verbatim,
 # so a data disk partitioned in the golden image would give every VM a
@@ -38,8 +39,17 @@ docker_data_mount_path: /var/lib/docker
 
 # nofail is load-bearing, not boilerplate. Detaching this disk to move it to
 # another VM must not leave the original host unbootable waiting on a mount
-# that will never appear.
+# that will never appear. The host boots; containerd and Docker stay down,
+# because the role's systemd drop-ins make them require these mounts.
 docker_data_mount_opts: defaults,noatime,nofail
+
+# Docker's containerd image store keeps images and container layers in
+# containerd's root, not under /var/lib/docker. The role bind-mounts this
+# directory on the data disk over it. Not named plain `containerd`: dockerd
+# uses <data-root>/containerd for the containerd it launches itself when no
+# system containerd runs, and the two must never be confused.
+docker_data_containerd_path: /var/lib/containerd
+docker_data_containerd_source: "{{ docker_data_mount_path }}/containerd-root"
 
 # Temporary mount point used only while seeding a freshly created filesystem
 # with whatever /var/lib/docker already held.

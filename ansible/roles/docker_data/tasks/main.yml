@@ -139,9 +139,15 @@
       check_mode: false
       failed_when: false
 
+    # findmnt reports the device-mapper name, which doubles every hyphen in
+    # the VG and LV names: docker-vg/docker-lv is /dev/mapper/docker--vg-docker--lv.
+    # Matching on the bare LV name never hit, so this block re-ran on every
+    # play — harmless only because the copy refuses a non-empty volume.
     - name: Seed the data volume from the existing /var/lib/docker
       when: >-
-        docker_data_lv not in (_docker_data_current_mount.stdout | default(''))
+        (_docker_data_current_mount.stdout | default('') | trim) !=
+        '/dev/mapper/' ~ (docker_data_vg | replace('-', '--')) ~ '-'
+        ~ (docker_data_lv | replace('-', '--'))
       block:
         - name: Create the temporary seed mount point
           ansible.builtin.file:
@@ -241,9 +247,12 @@
         cmd: "blkid -o value -s UUID /dev/{{ docker_data_vg }}/{{ docker_data_lv }}"
       register: _docker_data_fs_uuid
       changed_when: false
-      # Not forced to run under --check: on a blank disk the LV does not exist
-      # yet in a dry run, so there is no UUID to read. The mount below is
-      # skipped in that case instead.
+      # Runs under --check too. Skipped, the command module still registers
+      # stdout as '' (not undefined), so a dry run used to "mount" UUID= here.
+      # A blank disk's dry run has already ended above; an empty result means
+      # there is no filesystem to mount, and the tasks below skip.
+      check_mode: false
+      failed_when: false
 
     - name: Mount the data volume at /var/lib/docker
       # By UUID rather than /dev/sdb: the device name depends on enumeration
@@ -256,7 +265,164 @@
         opts: "{{ docker_data_mount_opts }}"
         state: mounted
       notify: Start docker
-      when: _docker_data_fs_uuid.stdout is defined
+      when: _docker_data_fs_uuid.stdout | trim | length > 0
+
+    # ---------------------------------------------------------------------
+    # Put containerd's root on the data volume as well
+    #
+    # With Docker's containerd image store, images and container layers live
+    # in /var/lib/containerd, not under /var/lib/docker, so the mount above
+    # does not cover them. Left alone, every pull lands on the 12G OS root
+    # while the data disk sits empty — which is how the monitoring VM's root
+    # filled with ~5G of Elastic images and apt stopped working.
+    #
+    # A bind mount, not containerd's `root =` in config.toml (a containerd.io
+    # conffile, so a dpkg prompt on every upgrade) and not turning the image
+    # store off in daemon.json (it is Docker's default now, and opting out
+    # re-pulls every image). Both daemons keep their stock paths; one disk
+    # holds all container state, so moving the disk moves images too.
+    # ---------------------------------------------------------------------
+    - name: Check whether containerd's root is already a mount point
+      ansible.builtin.command:
+        cmd: "findmnt --noheadings --mountpoint {{ docker_data_containerd_path }}"
+      register: _docker_data_containerd_mount
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Move containerd's root onto the data volume
+      when:
+        - _docker_data_containerd_mount.rc != 0
+        - _docker_data_fs_uuid.stdout | trim | length > 0
+      block:
+        - name: Create containerd's directory on the data volume
+          ansible.builtin.file:
+            path: "{{ docker_data_containerd_source }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0711"
+
+        - name: Look for existing containerd state on the data volume
+          ansible.builtin.find:
+            paths: "{{ docker_data_containerd_source }}"
+            file_type: any
+            hidden: true
+          register: _docker_data_containerd_volume_content
+
+        # Always, even with nothing to copy: containerd holds meta.db open,
+        # and mounting over a live root would split its state across two
+        # filesystems.
+        - name: Stop Docker and containerd before moving containerd's root
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+          loop:
+            - docker.socket
+            - docker.service
+            - containerd.service
+
+        # With the daemons down nothing should be mounted beneath containerd's
+        # root. If something is (a stuck unpack in tmpmounts/), rsync would
+        # copy through it and the removal below would delete through it.
+        - name: List mounts beneath containerd's root
+          ansible.builtin.command:
+            cmd: findmnt --noheadings --list --output TARGET
+          register: _docker_data_mounts
+          changed_when: false
+          check_mode: false
+
+        - name: Refuse to move containerd's root while something is mounted inside it
+          ansible.builtin.assert:
+            that:
+              - _docker_data_nested_mounts | length == 0
+            fail_msg: >-
+              {{ _docker_data_nested_mounts | join(', ') }} still mounted
+              beneath {{ docker_data_containerd_path }} with containerd stopped.
+              Unmount them by hand, then re-run. Docker and containerd are
+              stopped now; `systemctl start docker` brings them back meanwhile.
+            quiet: true
+          vars:
+            _docker_data_nested_mounts: >-
+              {{ _docker_data_mounts.stdout_lines
+                 | select('match', '^' ~ docker_data_containerd_path ~ '/')
+                 | list }}
+
+        # Same flags and reasons as the /var/lib/docker seed above: overlayfs
+        # snapshots need hardlinks (-H) and xattrs (-X) intact. Skipped when
+        # the volume already carries containerd state — a disk adopted from
+        # another host, whose images win; this host's own copy then stays
+        # shadowed on the OS disk, like /var/lib/docker's does.
+        - name: Copy containerd's state onto the data volume # noqa: command-instead-of-module
+          ansible.builtin.command:
+            cmd: >-
+              rsync -aHAX --numeric-ids
+              {{ docker_data_containerd_path }}/
+              {{ docker_data_containerd_source }}/
+          register: _docker_data_containerd_copy
+          changed_when: true
+          when: _docker_data_containerd_volume_content.matched == 0
+
+        # This is the step that frees the OS disk. Unlike /var/lib/docker's
+        # reclaim, which is left manual above, it is safe to automate: the
+        # original is not under a mount yet, and rsync has just exited 0.
+        # The bind mount below recreates the empty mount point. Not a handler:
+        # it has to run before that mount, not at the end of the play. "Not
+        # skipped" means the copy ran, and a failed rsync ends the play first.
+        - name: Remove containerd's old root from the OS disk
+          ansible.builtin.file:
+            path: "{{ docker_data_containerd_path }}"
+            state: absent
+          when: _docker_data_containerd_copy is not skipped
+
+    - name: Bind-mount containerd's root from the data volume
+      # x-systemd.requires-mounts-for orders the bind after the data volume at
+      # boot, so it never lands on the empty directory underneath it.
+      ansible.posix.mount:
+        path: "{{ docker_data_containerd_path }}"
+        src: "{{ docker_data_containerd_source }}"
+        fstype: none
+        opts: "bind,nofail,x-systemd.requires-mounts-for={{ docker_data_mount_path }}"
+        state: mounted
+      register: _docker_data_containerd_bind
+      when: _docker_data_fs_uuid.stdout | trim | length > 0
+
+    # nofail keeps the host bootable without its data disk, but it also drops
+    # both mounts' ordering against local-fs.target, so nothing stopped
+    # containerd or dockerd from starting first and writing to the OS disk.
+    # RequiresMountsFor restores the ordering and fails closed: with the disk
+    # gone the VM still boots, but Docker stays down instead of starting
+    # empty on the OS root — a fresh, empty Elasticsearch is worse than none.
+    - name: Create the systemd drop-in directories for containerd and Docker
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}.d"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - containerd.service
+        - docker.service
+
+    - name: Make containerd and Docker require their data mounts
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item.unit }}.d/docker-data.conf"
+        content: |
+          # Managed by Ansible (docker_data role).
+          [Unit]
+          RequiresMountsFor={{ item.path }}
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - { unit: containerd.service, path: "{{ docker_data_containerd_path }}" }
+        - { unit: docker.service, path: "{{ docker_data_mount_path }}" }
+      register: _docker_data_dropins
+
+    - name: Reload systemd for the new drop-ins and fstab entries
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: _docker_data_dropins is changed or _docker_data_containerd_bind is changed
 
     - name: Ensure Docker is running on the new mount
       ansible.builtin.systemd_service:
@@ -264,5 +430,6 @@
         state: started
         enabled: true
       loop:
+        - containerd.service
         - docker.socket
         - docker.service
