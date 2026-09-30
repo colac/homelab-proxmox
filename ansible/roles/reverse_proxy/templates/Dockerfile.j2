@@ -1,8 +1,8 @@
 # Managed by Ansible (role: reverse_proxy) — do not edit by hand.
 # Caddy built with the Cloudflare DNS plugin so ACME can use DNS-01 challenges
 # (no inbound port 80/443 from the internet required).
-FROM caddy:2-builder AS builder
-RUN xcaddy build --with github.com/caddy-dns/cloudflare
+FROM caddy:{{ reverse_proxy_caddy_version }}-builder AS builder
+RUN xcaddy build --with github.com/caddy-dns/cloudflare@{{ reverse_proxy_caddy_dns_cloudflare_version }}
 
-FROM caddy:2
+FROM caddy:{{ reverse_proxy_caddy_version }}
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy

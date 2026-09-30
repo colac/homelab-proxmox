@@ -97,6 +97,8 @@ The template builds **one** disk. The Docker data disk is attached by Terraform
 /dev/sdb  (Terraform data_disk_size)  raw at clone time
 └─ LVM PV ── docker-vg ── docker-lv ── ext4 ── /var/lib/docker
              created by the Ansible docker_data role, not here
+                                               └─ containerd-root/  bind-mounted
+                                                  at /var/lib/containerd (images)
 ```
 
 **No logical volume is sized `-1`.** Leaving free extents in `ubuntu-vg` is the

@@ -370,5 +370,5 @@ variable "elastic_base_dir" {
 variable "elastic_agent_version" {
   type        = string
   description = "Elastic Agent version pre-installed (and left disabled) in the template. Should match stack_version in ansible/inventory/group_vars/all.yml; the elastic_agent role reinstalls if they drift."
-  default     = "9.4.2"
+  default     = "9.5.4"
 }
