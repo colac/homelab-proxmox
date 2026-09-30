@@ -383,6 +383,41 @@ then Manage Configuration → Upload File) and is not part of this pipeline.
 
 ## Troubleshooting
 
+### Rotating the Cloudflare API token (or a cert failed to renew)
+
+One token, `cloudflare_dns_api_token` in `secrets.yaml`, serves **both** certs:
+Caddy on the Nextcloud VM and certbot on the monitoring VM (Kibana). Rotate it
+in one pass. The token needs `Zone:DNS:Edit` on the zone of `nextcloud_domain`.
+
+```bash
+# 1. Cloudflare dashboard → My Profile → API Tokens → create/roll the token.
+# 2. Put it in place (values are edited via sops, never with a text editor):
+sops secrets.yaml            # set cloudflare_dns_api_token
+direnv reload                # or cd out and back in; verify with: env | grep -c CLOUDFLARE_DNS_API_TOKEN
+
+# 3. Push it to both hosts (from ansible/, venv active)
+ansible-playbook playbooks/10-nextcloud.yml --limit nextcloud-vm   # rewrites Caddy's .env, restarts Caddy
+ansible-playbook playbooks/35-kibana.yml    --limit monitoring-vm  # rewrites /etc/letsencrypt/cloudflare.ini, renews if due
+```
+
+Then confirm each cert actually renews rather than assuming:
+
+- **Caddy:** `docker logs nextcloud-caddy 2>&1 | tail -50` on the Nextcloud VM.
+  Caddy retries ACME on restart, so a new token normally issues within a minute
+  or two. Look for `certificate obtained successfully`.
+- **Kibana:** on the monitoring VM, `sudo certbot renew --dry-run` proves the
+  new credentials work. The playbook only renews when the cert is inside
+  certbot's 30-day window; if it is not yet due but you want the new token
+  exercised for real, `sudo certbot renew --force-renewal` (the deploy-hook
+  copies the pair in and restarts Kibana). Check the result with
+  `sudo certbot certificates`.
+
+If it still fails, the usual causes are a token scoped to the wrong zone, a
+token with `Zone:Read` but no `DNS:Edit`, or the env var not reaching Ansible
+(the `common` role's assert fails the run in that case). Expiry dates of the
+old cert are your deadline: Let's Encrypt certs last 90 days and both tools
+start renewing at 30 days remaining.
+
 ### An off-LAN device (phone/laptop on Tailscale) can't open the URL
 
 Almost always **DNS, not connectivity**. The hostname only exists as a private
