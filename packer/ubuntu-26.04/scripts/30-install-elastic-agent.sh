@@ -19,7 +19,7 @@ set -euo pipefail
 #   ELASTIC_AGENT_VERSION   version to install (default below)
 #   INSTALL_ELASTIC_AGENT   set false to skip entirely
 
-AGENT_VERSION="${ELASTIC_AGENT_VERSION:-9.4.2}"
+AGENT_VERSION="${ELASTIC_AGENT_VERSION:-9.5.4}"
 INSTALL="${INSTALL_ELASTIC_AGENT:-true}"
 
 readonly LOG_FILE="/var/log/elastic-agent-install.log"
