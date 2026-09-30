@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/colac/homelab-proxmox/compare/v1.3.0...v1.3.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **docker_data:** keep containerd images on the data disk ([b7a2742](https://github.com/colac/homelab-proxmox/commit/b7a2742d96a8f8c0db5ee4d0975631d564e1beeb))
+
 # [1.3.0](https://github.com/colac/homelab-proxmox/compare/v1.2.0...v1.3.0) (2026-09-25)
 
 
