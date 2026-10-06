@@ -1,5 +1,0 @@
----
-- name: Restart exporters
-  community.docker.docker_compose_v2:
-    project_src: "{{ exporters_dir }}"
-    state: restarted

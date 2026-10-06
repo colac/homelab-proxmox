@@ -2,28 +2,27 @@
 # OPTIONAL overrides for the Ubuntu 24.04 template build.
 #
 # You normally need NO var-file at all. Everything credential-shaped arrives as
-# PKR_VAR_* environment variables from packer/.envrc, which direnv fills by
-# decrypting the repo-root secrets.yaml (SOPS + age):
+# PKR_VAR_* environment variables from .mise/sops-exec, which decrypts the
+# repo-root secrets.yaml (SOPS + age) for the one packer command it wraps:
 #
 #   PKR_VAR_proxmox_api_url           <- proxmox_endpoint + /api2/json
 #   PKR_VAR_proxmox_api_token_id      <- proxmox_packer_token_id
 #   PKR_VAR_proxmox_api_token_secret  <- proxmox_packer_token_secret
-#   PKR_VAR_proxmox_node              <- PROXMOX_NODE
+#   PKR_VAR_proxmox_node              <- PROXMOX_NODE (mise.toml [env])
 #   PKR_VAR_proxmox_skip_tls_verify   <- PROXMOX_TLS_INSECURE
 #   PKR_VAR_password_hash             <- packer_password_hash
-#   PKR_VAR_ssh_authorized_keys       <- ~/.ssh/homelab-proxmox.pub, read at load
-#   PKR_VAR_http_interface            <- PACKER_HTTP_INTERFACE (.envrc.local)
+#   PKR_VAR_ssh_authorized_keys       <- ~/.ssh/homelab-proxmox.pub, read per run
+#   PKR_VAR_http_interface            <- PACKER_HTTP_INTERFACE (mise.local.toml)
 #
 # So the build is just:
 #
-#   cd packer/ubuntu-24.04
-#   packer init .
-#   packer validate .
-#   packer build .
+#   mise run packer:validate 24.04
+#   mise run packer:build 24.04
 #
 # Copy this file to variables.pkrvars.hcl only if you want to pin a non-default
-# value below, then pass -var-file=variables.pkrvars.hcl. A var-file takes
-# precedence over PKR_VAR_*, so anything you set here wins. That file is
+# value below, then pass it through:
+#   mise run packer:build 24.04 -var-file=variables.pkrvars.hcl
+# A var-file takes precedence over PKR_VAR_*, so anything you set here wins. That file is
 # git-ignored (*.pkrvars.hcl) — never put a credential in this .example.
 # ============================================================================
 

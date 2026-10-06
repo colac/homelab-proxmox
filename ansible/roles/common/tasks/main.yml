@@ -1,8 +1,12 @@
 ---
-# tasks file for common — preflight checks for a Packer-provisioned host.
-# sysctl, ulimits, and the compose base directory are baked into the
-# Packer template (see packer/ubuntu-24.04/http/user-data.yml.tpl); this
-# role only verifies the host is ready before ES/kibana render compose files.
+# tasks file for common — preflight checks for a host cloned from this repo's
+# Packer template. Nothing here changes anything; it fails early, and names
+# the real cause, when a host is not what the later plays assume.
+#
+# Deliberately generic: every consumer (monitoring, workloads) runs it.
+# Checks that belong to one workload live in that workload's repo — the
+# Elasticsearch prerequisites, for one, are asserted by the monitoring repo's
+# elastic_preflight role.
 
 - name: Include checks/asserts
   ansible.builtin.include_tasks: asserts.yml

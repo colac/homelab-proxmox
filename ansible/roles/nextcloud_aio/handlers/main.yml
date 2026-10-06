@@ -1,5 +1,0 @@
----
-- name: Restart Nextcloud AIO
-  community.docker.docker_compose_v2:
-    project_src: "{{ nextcloud_aio_dir }}"
-    state: restarted

@@ -1,7 +1,0 @@
----
-- name: Enroll the Elastic Agents with Fleet
-  hosts: all
-  become: true
-  gather_facts: true
-  roles:
-    - elastic_agent

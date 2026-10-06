@@ -1,7 +1,8 @@
 # base-vm (Terraform module)
 
 Reusable module that clones a Proxmox VM template into a cloud-init VM. Used by
-the projects under `terraform/projects/`.
+the Terraform projects in the monitoring and workloads repos, pinned to a
+release tag of this repo — see [../../README.md](../../README.md).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

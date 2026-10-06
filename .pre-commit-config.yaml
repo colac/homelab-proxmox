@@ -44,21 +44,24 @@ repos:
       #     - --args=-c checkov.yaml
       #   files: ^terraform/
 
-  - repo: https://github.com/cisagov/pre-commit-packer
-    rev: v0.3.1
+  # Packer. `files:` used to be ^packer/\.pkr\.hcl$, which matches no real
+  # file, so neither hook ever ran. Validate is -syntax-only because real
+  # variables only exist inside `mise run packer:validate <release>` — secrets
+  # are never in the environment a git hook inherits.
+  - repo: local
     hooks:
       - id: packer_fmt
         name: Packer fmt
-        entry: bash -c 'packer fmt -recursive .'
+        entry: packer fmt -check -diff -recursive packer
         language: system
-        files: ^packer/\.pkr\.hcl$
+        files: ^packer/.*\.pkr\.hcl$
         pass_filenames: false
 
       - id: packer_validate
-        name: Packer validate
-        entry: bash -c 'for dir in */; do (cd "$dir" && if ls *.pkr.hcl 1> /dev/null 2>&1; then packer validate .; fi); done'
+        name: Packer validate (syntax only)
+        entry: bash -c 'for d in packer/*/; do packer validate -syntax-only "$d" || exit 1; done'
         language: system
-        files: ^packer/\.pkr\.hcl$
+        files: ^packer/.*\.pkr\.hcl$
         pass_filenames: false
 
 #  # Ansible
@@ -85,6 +88,8 @@ repos:
     hooks:
       - id: markdownlint
         args: [--config, .markdownlint.json]
+        # Written by semantic-release, not by hand — never edited, never linted.
+        exclude: ^CHANGELOG\.md$
 
   # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py

@@ -1,11 +1,13 @@
 # Packer — Ubuntu base templates
 
-Builds the **golden images** every VM in this repo is cloned from: hardened
+Builds the **golden images** every VM in the homelab is cloned from — by the
+monitoring and workloads repos' Terraform, via `template_name`: hardened
 Ubuntu LTS Proxmox templates with Docker, Tailscale and the Elastic Agent
 package baked in, sealed so that clones boot clean.
 
-This is stage 1 of the pipeline — see the [root README](../README.md) for how it
-fits with Terraform and Ansible.
+This is stage 1 of the pipeline and the main thing the core layer publishes —
+see [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for how the templates are
+consumed, and why their names are a contract.
 
 ```text
 ISO  ──▶ autoinstall (cloud-init user-data over HTTP)
@@ -143,7 +145,7 @@ packer/<release>/
 ├── versions.pkr.hcl              # required plugins/versions
 ├── locals.pkr.hcl                # renders user-data from the template
 ├── variables.pkrvars.hcl.example # OPTIONAL non-secret overrides (secrets come
-│                                 # from PKR_VAR_* via direnv)
+│                                 # from PKR_VAR_* via .mise/sops-exec)
 ├── http/
 │   ├── user-data.yml.tpl         # autoinstall config (templated from locals)
 │   └── meta-data.yml
@@ -162,7 +164,7 @@ provisioner like the others — see "Ubuntu 26.04 specifics" below for why.
 
 ## Prerequisites
 
-- **Packer ≥ 1.10** — `./install-packer.sh` from the repo root.
+- **Packer** — pinned in `mise.toml`; `mise install` from the repo root.
 - **Proxmox 9+** with an API token for a `packer@pve` user (below).
 - **The Ubuntu ISO uploaded to Proxmox storage** — the name must match
   `boot_iso_file` for the release you are building (see the table above).
@@ -191,11 +193,11 @@ pveum user token add packer@pve packer-automation --privsep 0
 ```
 
 Put the token ID and secret in the repo-root `secrets.yaml` as
-`proxmox_packer_token_id` / `proxmox_packer_token_secret` (`sops secrets.yaml`).
-`packer/.envrc` turns them into `PKR_VAR_proxmox_api_token_id` /
-`PKR_VAR_proxmox_api_token_secret` when you `cd` in — see
-[Secrets](../README.md#secrets). That `.envrc` sits at `packer/`, so **both**
-release directories inherit it; there is nothing per-release to set up.
+`proxmox_packer_token_id` / `proxmox_packer_token_secret`
+(`mise run secrets:edit`). `.mise/sops-exec packer` turns them into
+`PKR_VAR_proxmox_api_token_id` / `PKR_VAR_proxmox_api_token_secret` for the one
+`packer` command it wraps — see [Secrets](../README.md#secrets). Both release
+directories use the same profile; there is nothing per-release to set up.
 
 ### Running from WSL
 
@@ -217,35 +219,40 @@ other.
 ## Build
 
 ```bash
-cd packer/ubuntu-26.04      # or packer/ubuntu-24.04
-                            # direnv exports PKR_VAR_* on the way in
+mise run secrets:check            # every key present? (names only, no values)
+mise run packer:validate 26.04    # init + validate with the real variables
+mise run packer:build 26.04       # or 24.04
 
-packer init .
-packer validate .
-packer build .
-
-# verbose build log
-PACKER_LOG=1 packer build .
+# verbose build log; extra args go to `packer build`
+PACKER_LOG=1 mise run packer:build 26.04 -on-error=ask
 ```
 
-No var-file is needed. `packer/.envrc` supplies the API URL, token, node, TLS
-flag, `password_hash`, and `ssh_authorized_keys` (read from
-`~/.ssh/homelab-proxmox.pub` at load time, because password auth is disabled in
-the image — an empty value would build a template nobody can log in to). If
-`PKR_VAR_ssh_authorized_keys` is missing, direnv says so at `cd` time rather
-than letting the build succeed unusably.
+No var-file is needed. `.mise/sops-exec packer` supplies the API URL, token,
+node, TLS flag, `password_hash`, and `ssh_authorized_keys` (read from
+`~/.ssh/homelab-proxmox.pub` at run time, because password auth is disabled in
+the image — an empty value would build a template nobody can log in to). If the
+key file is missing, sops-exec refuses to start the build rather than letting
+it succeed unusably. Running `packer` bare in a release directory gets **no**
+credentials — by design, nothing is exported into your shell.
 
 `variables.pkrvars.hcl.example` is now only for **non-secret** overrides
 (sizing, ISO, feature flags). A `-var-file` still takes precedence over
 `PKR_VAR_*`, so an existing local `variables.pkrvars.hcl` keeps working.
 
 Building while a VPN holds the default route? Set `PACKER_HTTP_INTERFACE` to
-your LAN NIC in `.envrc.local` (git-ignored) so `{{ .HTTPIP }}` in the boot
-command resolves to an address the VM can actually reach.
+your LAN NIC in `mise.local.toml` (git-ignored) so `{{ .HTTPIP }}` in the boot
+command resolves to an address the VM can actually reach:
+
+```toml
+# mise.local.toml
+[env]
+PACKER_HTTP_INTERFACE = "enp3s0"
+```
 
 Output: a sealed Proxmox **template** at the `vm_name` / `vm_id` for that
-release, plus a build manifest. Terraform clones it from there — nothing else
-needs to be done to the template.
+release, plus a build manifest. The other repos' Terraform clones it from there
+by name — nothing else needs to be done to the template. Renaming a template
+breaks every consumer whose `template_name` points at it.
 
 > Rebuilding with the same `vm_id` fails while the old template still exists.
 > Delete or renumber the previous template first. This is also why 26.04 sits at
@@ -346,7 +353,7 @@ build:
 ## Configuration variables
 
 Defined in each release's `variables.pkr.hcl`. The credential-shaped ones arrive
-as `PKR_VAR_*` from `packer/.envrc`; anything else can be overridden with
+as `PKR_VAR_*` from `.mise/sops-exec packer`; anything else can be overridden with
 `packer build -var-file=variables.pkrvars.hcl`, which wins over the environment.
 The most commonly changed ones:
 

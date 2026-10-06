@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# sops-exec — run ONE command with the credentials it needs, and nothing else.
+#
+#   .mise/sops-exec <profile> <command> [args...]   # what the mise tasks call
+#   .mise/sops-exec --check <profile>               # names missing keys, prints no values
+#
+# Decrypts a SOPS file into this process only, exports the subset <profile>
+# needs under the names its tool reads, then execs the command. Nothing lands
+# in your shell, so neither you nor an agent working in this repo holds a
+# credential between commands ("no ambient access"). It replaces the .envrc
+# files direnv used to load.
+#
+# The `while read` loop is inherited from the old root .envrc on purpose:
+# `eval` would re-parse the plaintext as shell, and any value with a space,
+# quote or `$` would break or be word-split.
+#
+# Profiles in this repo: packer.
+# The same script, with different profiles, lives in each homelab repo.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+check=false
+if [[ ${1:-} == --check ]]; then
+  check=true
+  shift
+fi
+profile=${1:?usage: sops-exec [--check] <profile> [command...]}
+shift
+
+declare -A S=()
+missing=()
+empty_optional=()
+
+# load FILE — decrypt into S. Never to disk, never to stdout.
+load() {
+  local file=$1 out line
+  if [[ ! -f $file ]]; then
+    echo "sops-exec: ${file#"$root"/} not found. Create it from ${file##*/}.example: sops ${file#"$root"/}" >&2
+    exit 1
+  fi
+  if ! out=$(sops -d --output-type dotenv "$file"); then
+    echo "sops-exec: cannot decrypt ${file#"$root"/} — is your age key at ${SOPS_AGE_KEY_FILE:-~/.config/sops/age/keys.txt}?" >&2
+    exit 1
+  fi
+  while IFS= read -r line; do
+    [[ -z $line || $line == \#* ]] && continue
+    S[${line%%=*}]=${line#*=}
+  done <<<"$out"
+}
+
+# need KEY... — required; the command does not start without them.
+need() {
+  local k
+  for k; do [[ -n ${S[$k]:-} ]] || missing+=("$k"); done
+}
+
+# want KEY... — optional; empty is a valid choice, reported by --check.
+want() {
+  local k
+  for k; do [[ -n ${S[$k]:-} ]] || empty_optional+=("$k"); done
+}
+
+# put VAR KEY — export VAR with the value of secret KEY.
+put() { export "$1=${S[$2]:-}"; }
+
+case $profile in
+  packer)
+    load "$root/secrets.yaml"
+    need proxmox_endpoint proxmox_packer_token_id proxmox_packer_token_secret packer_password_hash
+    endpoint=${S[proxmox_endpoint]:-}
+    export PKR_VAR_proxmox_api_url="${endpoint%/}/api2/json"
+    put PKR_VAR_proxmox_api_token_id proxmox_packer_token_id
+    put PKR_VAR_proxmox_api_token_secret proxmox_packer_token_secret
+    put PKR_VAR_password_hash packer_password_hash
+    # Non-secret, from mise.toml [env] (override in mise.local.toml).
+    export PKR_VAR_proxmox_node=${PROXMOX_NODE:?PROXMOX_NODE unset — run through mise}
+    export PKR_VAR_proxmox_skip_tls_verify=${PROXMOX_TLS_INSECURE:-false}
+    if [[ -n ${PACKER_HTTP_INTERFACE:-} ]]; then
+      export PKR_VAR_http_interface=$PACKER_HTTP_INTERFACE
+    fi
+    # Password login is disabled in the image, so the deploy key's public half
+    # is the only way in. Read here so it always matches ssh_private_key_file.
+    pub=${HOMELAB_SSH_PUBLIC_KEY:-$HOME/.ssh/homelab-proxmox.pub}
+    if [[ -r $pub ]]; then
+      PKR_VAR_ssh_authorized_keys=$(printf '["%s"]' "$(tr -d '\n' <"$pub")")
+      export PKR_VAR_ssh_authorized_keys
+    else
+      missing+=("$pub (deploy key, public half)")
+    fi
+    ;;
+  *)
+    echo "sops-exec: unknown profile '$profile' (this repo has: packer)" >&2
+    exit 2
+    ;;
+esac
+
+if ((${#missing[@]})); then
+  printf 'sops-exec: profile %s is missing:\n' "$profile" >&2
+  printf '  - %s\n' "${missing[@]}" >&2
+  echo "Set them with: mise run secrets:edit (keys are listed in the matching secrets.yaml.example)" >&2
+  exit 1
+fi
+
+if $check; then
+  echo "sops-exec: profile $profile has every required key"
+  if ((${#empty_optional[@]})); then
+    printf '  optional, currently empty: %s\n' "${empty_optional[*]}"
+  fi
+  exit 0
+fi
+
+(($#)) || { echo "sops-exec: no command given" >&2; exit 2; }
+exec "$@"
