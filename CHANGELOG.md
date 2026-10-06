@@ -1,3 +1,20 @@
+# [2.0.0](https://github.com/colac/homelab-proxmox/compare/v1.3.1...v2.0.0) (2026-10-06)
+
+
+### Code Refactoring
+
+* split monitoring and workloads into their own repos ([aa07fd6](https://github.com/colac/homelab-proxmox/commit/aa07fd6144f82c33759b9562cfb66e93ec445647))
+
+
+### BREAKING CHANGES
+
+* the Elastic stack moved to homelab-proxmox-monitoring
+and Nextcloud/k3s to homelab-proxmox-workloads. Consumers use base-vm
+via git::...//terraform/modules/base-vm?ref=vX.Y.Z and colac.homelab
+via ansible/requirements.yml at the same tag.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 ## [1.3.1](https://github.com/colac/homelab-proxmox/compare/v1.3.0...v1.3.1) (2026-09-30)
 
 
