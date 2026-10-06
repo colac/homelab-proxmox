@@ -225,7 +225,7 @@ variable "password_hash" {
   type        = string
   description = <<EOT
 Console-login password hash for the default user (SSH is key-only; this is the
-tty/serial fallback). Supplied as PKR_VAR_password_hash by packer/.envrc, from
+tty/serial fallback). Supplied as PKR_VAR_password_hash by .mise/sops-exec, from
 packer_password_hash in the SOPS-encrypted secrets.yaml. Generate with:
 $ mkpasswd -m sha-512 '<yourpassword>'
 EOT
@@ -331,7 +331,7 @@ variable "ssh_timeout" {
 
 # SSH Keys for Default user. Password auth is disabled in the image, so if this
 # is empty nobody — Packer included — can ever log in to the built template.
-# packer/.envrc fills it from ~/.ssh/homelab-proxmox.pub at direnv load time.
+# .mise/sops-exec fills it from ~/.ssh/homelab-proxmox.pub for each packer run.
 variable "ssh_authorized_keys" {
   type        = list(string)
   description = "SSH authorized keys for default user"

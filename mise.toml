@@ -1,0 +1,113 @@
+# mise — pinned tools, environment and tasks for the core layer.
+# Replaces the Makefile, install-*.sh and the four .envrc files.
+#
+#   mise trust && mise install      # once per clone (and after editing this file)
+#   mise run setup                  # venv deps, node tools, git hooks, tflint plugins
+#   mise tasks                      # everything you can run
+#
+# Secrets are NOT loaded into your shell. Tasks that need credentials run
+# through .mise/sops-exec, which decrypts secrets.yaml for that one command.
+# Per-machine overrides (a VPN-proof Packer HTTP interface, a different node)
+# go in mise.local.toml, which is git-ignored.
+min_version = "2026.1.0"
+
+[tools]
+# Exact pins are load-bearing — bump deliberately, one at a time.
+packer = "1.16.0"
+terraform = "1.15.7"
+terraform-docs = "0.21.0"
+tflint = "0.63.1"
+trivy = "0.71.2"
+shellcheck = "0.11.0"
+sops = "3.13.3"
+age = "1.3.2"
+# ansible-core 2.17 supports controller Python 3.10–3.12 only.
+python = "3.12"
+node = "26.4.0"
+
+[env]
+# Python tools (ansible-core, ansible-lint, pre-commit, …) live in this venv;
+# mise activates it in your shell and inside every task.
+_.python.venv = { path = ".venv", create = true }
+_.path = ["{{config_root}}/node_modules/.bin"]
+# Not secrets — the hypervisor's address is, and lives in secrets.yaml.
+PROXMOX_NODE = "pve"
+PROXMOX_TLS_INSECURE = "false"
+# sops opens decrypted files in VS Code, for `mise run secrets:edit` and for
+# bare `sops` in a mise-activated shell. Set here so the repo decides, not
+# whatever EDITOR a given terminal happens to have. --wait is load-bearing:
+# without it `code` returns at once and sops re-encrypts the unedited file.
+SOPS_EDITOR = "code --wait"
+
+# --------------------------------------------------------------------------
+# Setup and checks
+# --------------------------------------------------------------------------
+[tasks.setup]
+description = "Install Python/Node deps, git hooks and tflint plugins (after `mise install`)"
+run = [
+  "pip install -q --upgrade pip",
+  "pip install -q -r requirements.txt",
+  "npm ci --silent",
+  "pre-commit install --hook-type pre-commit --hook-type commit-msg",
+  "tflint --init",
+]
+
+[tasks.lint]
+description = "Every pre-commit hook on every file, then ansible-lint"
+run = ["pre-commit run --all-files", { task = "lint:ansible" }]
+
+[tasks."lint:ansible"]
+description = "ansible-lint (production profile) on the colac.homelab collection"
+dir = "{{config_root}}/ansible"
+run = "ansible-lint"
+
+[tasks."tf:validate"]
+description = "terraform fmt + validate the base-vm module (no backend, no credentials)"
+dir = "{{config_root}}/terraform/modules/base-vm"
+run = [
+  "terraform fmt -check -recursive",
+  "terraform init -backend=false -input=false >/dev/null",
+  "terraform validate",
+]
+
+[tasks."release:dry-run"]
+description = "Show the version semantic-release would cut next"
+run = "semantic-release --no-ci --dry-run"
+
+# --------------------------------------------------------------------------
+# Secrets
+# --------------------------------------------------------------------------
+[tasks."secrets:edit"]
+description = "Open secrets.yaml decrypted in VS Code; re-encrypts on save"
+run = "sops secrets.yaml"
+# Hand the terminal straight to sops and its editor (SOPS_EDITOR in [env]).
+# Without it mise sits between them.
+raw = true
+
+[tasks."secrets:check"]
+description = "Verify secrets.yaml has every key Packer needs (prints names, never values)"
+run = ".mise/sops-exec --check packer"
+
+# --------------------------------------------------------------------------
+# Packer — the templates every other layer clones
+# --------------------------------------------------------------------------
+[tasks."packer:validate"]
+description = "packer init + validate one template, with real variables"
+usage = 'arg "<release>" help="Template to validate" { choices "24.04" "26.04"; }'
+run = '''
+cd packer/ubuntu-${usage_release}
+packer init .
+{{config_root}}/.mise/sops-exec packer packer validate .
+'''
+
+[tasks."packer:build"]
+description = "Build one template on Proxmox (extra args go to packer build, e.g. -on-error=ask)"
+usage = '''
+arg "<release>" help="Template to build" { choices "24.04" "26.04"; }
+arg "[args]..." help="Passed to packer build" var=#true
+'''
+run = '''
+cd packer/ubuntu-${usage_release}
+packer init .
+{{config_root}}/.mise/sops-exec packer packer build ${usage_args:-} .
+'''

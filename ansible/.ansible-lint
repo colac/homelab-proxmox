@@ -1,0 +1,7 @@
+---
+# ansible-lint for the colac.homelab collection. `mise run lint:ansible`.
+profile: production
+skip_list:
+  # The changelog is the repo-root CHANGELOG.md, written by semantic-release on
+  # every release tag — the tag is what consumers pin, not galaxy.yml.
+  - galaxy[no-changelog]

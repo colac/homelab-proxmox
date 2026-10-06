@@ -1,8 +1,10 @@
 # Runbook — Ubuntu 26.04 template + split OS/Docker disks
 
 Working notes for rolling out the 24G LVM OS disk and the separate Docker data
-disk. **Temporary**: fold the durable parts into [MONITORING.md](MONITORING.md)
-and [packer/README.md](packer/README.md), then delete this file. Status lives in
+disk. **Temporary**: fold the durable parts into the monitoring repo's
+`RUNBOOK.md` and [packer/README.md](packer/README.md), then delete this file.
+Phases 0–2 run here (core); 3–4 in `homelab-proxmox-monitoring`; 5 in
+`homelab-proxmox-workloads`. All three are siblings under `~/git-repos/`. Status lives in
 [TODO.md](TODO.md), not here.
 
 ## What changes
@@ -27,24 +29,26 @@ ceiling.
 cd ~/git-repos/homelab-proxmox
 
 # The one file the agent cannot read for you. A .auto.pkrvars.hcl is loaded on
-# every build AND overrides PKR_VAR_* from direnv, so a disk_size pinned here
-# silently beats the 24G default.
+# every build AND overrides PKR_VAR_* from sops-exec, so a disk_size pinned
+# here silently beats the 24G default.
 grep -nE 'disk_size|vm_id|vm_name|boot_iso|lv_' packer/ubuntu-26.04/variables.auto.pkrvars.hcl
 
-# community.general is new (lvg/lvol/filesystem for the docker_data role)
-source .venv/bin/activate
-ansible-galaxy collection install -r ansible/requirements.yml
+# Tools and the shared collection (community.general's lvg/lvol/filesystem
+# come in as colac.homelab's dependencies)
+mise install && mise run setup
+(cd ../homelab-proxmox-monitoring && mise install && mise run setup)
 
 # State is in TFC; check what actually exists before planning
-(cd terraform/projects/k3s        && terraform init && terraform state list)
-(cd terraform/projects/monitoring && terraform init && terraform state list)
+(cd ../homelab-proxmox-workloads  && mise run tf k3s state list)
+(cd ../homelab-proxmox-monitoring && mise run tf state list)
 ```
 
 Upload the ISO to Proxmox `local`. The filename must match `boot_iso_file`
 exactly — this setup pins `ubuntu-26.04-live-server-amd64.iso` (the GA image),
 while the repo default is `ubuntu-26.04.1-live-server-amd64.iso`.
 
-No `.envrc` changed, so no `make direnv-allow`.
+`mise run secrets:check` in each repo confirms its `secrets.yaml` has every
+key that repo needs, without printing any value.
 
 > If a k3s VM already exists it is on the 24.04 template at 32G. The new
 > settings force a **destroy/recreate** — `clone` is ForceNew and Telmate
@@ -54,9 +58,8 @@ No `.envrc` changed, so no `make direnv-allow`.
 ## Phase 1 — Build the template
 
 ```bash
-cd packer/ubuntu-26.04
-packer init . && packer validate .
-PACKER_LOG=1 packer build . 2>&1 | tee /tmp/packer-2604.log
+mise run packer:validate 26.04
+PACKER_LOG=1 mise run packer:build 26.04 2>&1 | tee /tmp/packer-2604.log
 ```
 
 ### If the installer crashes
@@ -251,10 +254,11 @@ qm stop 999 && qm destroy 999
 
 ## Phase 3 — Monitoring VM
 
+In `homelab-proxmox-monitoring`:
+
 ```bash
-cd terraform/projects/monitoring
-terraform plan       # expect: scsi0 24G, scsi1 100G, ubuntu-26.04-template
-terraform apply
+mise run tf:plan     # expect: scsi0 24G, scsi1 100G, ubuntu-26.04-template
+mise run tf:apply
 ```
 
 The guest-agent IP `check` block usually fails on the first apply. Re-run
@@ -263,16 +267,17 @@ address.
 
 ## Phase 4 — Ansible
 
-```bash
-cd ansible
-ansible-inventory --graph        # monitoring-vm under monitoring, elasticsearch, kibana
-ansible monitoring -m ping
+Still in `homelab-proxmox-monitoring`:
 
-# 00-bootstrap targets `all`, which includes the live nextcloud-vm. docker_data
-# skips it (no /dev/sdb) — prove that with --check before running unscoped.
-ansible-playbook playbooks/00-bootstrap.yml --limit monitoring --check --diff
-ansible-playbook playbooks/00-bootstrap.yml --limit monitoring
+```bash
+mise run inventory               # monitoring-vm under monitoring, elasticsearch, kibana
+mise run play playbooks/00-bootstrap.yml --check --diff
+mise run play playbooks/00-bootstrap.yml
 ```
+
+`00-bootstrap.yml` targets only the `monitoring` group now — the Nextcloud host
+belongs to the workloads repo, and appears in this inventory only as an agent
+target.
 
 Verify on the VM before continuing:
 
@@ -287,13 +292,15 @@ docker info | grep -i 'Root Dir'
 Then the rest:
 
 ```bash
-ansible-playbook playbooks/site.yml
+mise run play playbooks/site.yml
 ```
 
 ## Phase 5 — k3s (whenever)
 
+In `homelab-proxmox-workloads`:
+
 ```bash
-cd terraform/projects/k3s && terraform plan
+mise run tf k3s plan
 ```
 
 Recreate if the plan says so, or pin `disk0_size = "32G"` in `terraform.tfvars`
@@ -309,7 +316,8 @@ The reason the disks are split.
 3. Reassign the disk in Proxmox — Hardware → Disk Action → Reassign Owner, or
    `qm disk move` with `--target-vmid` on 8+ (check the syntax for your
    version).
-4. On the receiver: `ansible-playbook playbooks/00-bootstrap.yml --limit <host>`.
+4. On the receiver, in the repo that owns it:
+   `mise run play [app] playbooks/00-bootstrap.yml --limit <host>`.
    The role finds an existing `docker-vg`, **adopts it, and never reformats**.
 5. Only if both hosts have a `docker-vg`: `vgs -o vg_name,vg_uuid`, then
    `vgrename <uuid> docker-vg` — by UUID, since the names collide.

@@ -1,0 +1,40 @@
+---
+# colac.homelab — the host-level roles every layer shares.
+#
+# The monitoring and workloads repos install this straight from git, pinned to
+# a release tag of this repo (their ansible/requirements.yml):
+#
+#   - name: https://github.com/colac/homelab-proxmox.git#/ansible/
+#     type: git
+#     version: v2.0.0
+#
+# The git tag is the version consumers pin. `version` below is required by
+# ansible-galaxy but does not select anything — bump it on a breaking role
+# change so `ansible-galaxy collection list` tells installs apart.
+namespace: colac
+name: homelab
+version: 2.0.0
+readme: README.md
+authors:
+  - colac
+description: >-
+  Host preparation shared by every Proxmox VM in the homelab: preflight
+  asserts against the Packer template, and the Docker data disk under LVM.
+tags:
+  - infrastructure
+  - linux
+  - proxmox
+  - docker
+  - lvm
+dependencies:
+  # lvg / lvol / filesystem for docker_data. The upper bound is load-bearing:
+  # 13.x declares requires_ansible >=2.18, and mise.toml pins ansible-core
+  # 2.17.14 (requirements.txt). Raise both together or not at all.
+  community.general: ">=10.0.0,<13.0.0"
+  ansible.posix: ">=1.5.0"
+repository: https://github.com/colac/homelab-proxmox
+documentation: https://github.com/colac/homelab-proxmox/tree/main/ansible
+issues: https://github.com/colac/homelab-proxmox/issues
+build_ignore:
+  - "*.tar.gz"
+  - .ansible
