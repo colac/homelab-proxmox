@@ -1,0 +1,4 @@
+---
+# `mise run lint:ansible`. Must stay green at the production profile.
+profile: production
+offline: true

@@ -1,0 +1,25 @@
+---
+# Install (first run) and configure Pi-hole in the dns container.
+#
+#   mise run dns:play playbooks/10-pihole.yml --check --diff
+#   mise run dns:play playbooks/10-pihole.yml -e pihole_upgrade=true   # upgrade on purpose
+#
+# Not colac.homelab.common: that asserts Docker, which this container
+# deliberately does not run.
+- name: Configure the Pi-hole container
+  hosts: pihole
+  gather_facts: false
+  pre_tasks:
+    # Debian's LXC "standard" template ships without Python, so the first
+    # task cannot be a module. Raw is idempotent here: it does nothing once
+    # python3 exists.
+    - name: Ensure Python is present for Ansible
+      ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update -qq && apt-get install -y -qq python3)
+      register: _pihole_python
+      changed_when: "'Setting up python3' in _pihole_python.stdout"
+      check_mode: false
+
+    - name: Gather facts
+      ansible.builtin.setup:
+  roles:
+    - pihole

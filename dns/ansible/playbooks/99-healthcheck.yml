@@ -1,0 +1,46 @@
+---
+# Read-only verification; safe to run any time.
+#
+#   mise run dns:play playbooks/99-healthcheck.yml
+#
+# Fails if any managed record does not resolve to its address, or if blocking
+# is off — the two things that matter to every client on the LAN.
+- name: Check the resolver
+  hosts: pihole
+  gather_facts: false
+  tasks:
+    - name: Read Pi-hole's status
+      ansible.builtin.command: pihole status
+      register: _pihole_status
+      changed_when: false
+      check_mode: false
+
+    - name: Assert blocking is enabled
+      ansible.builtin.assert:
+        that: "'blocking is enabled' in (_pihole_status.stdout | lower)"
+        fail_msg: "{{ _pihole_status.stdout_lines }}"
+        quiet: true
+
+    - name: Resolve every managed record through Pi-hole
+      ansible.builtin.command: dig +short +time=2 +tries=1 @127.0.0.1 {{ item.fqdn if item.fqdn is defined else item.name ~ '.' ~ pihole_zone }} A
+      register: _pihole_dig
+      changed_when: false
+      check_mode: false
+      failed_when: item.ip not in _pihole_dig.stdout_lines
+      loop: "{{ pihole_local_records }}"
+      loop_control:
+        label: "{{ item.fqdn if item.fqdn is defined else item.name }} → {{ item.ip }}"
+
+    - name: Resolve a public name through the upstreams
+      ansible.builtin.command: dig +short +time=2 +tries=1 @127.0.0.1 github.com A
+      register: _pihole_public
+      changed_when: false
+      check_mode: false
+      failed_when: _pihole_public.stdout_lines | length == 0
+
+    - name: Confirm a known ad domain is blocked
+      ansible.builtin.command: dig +short +time=2 +tries=1 @127.0.0.1 doubleclick.net A
+      register: _pihole_blocked
+      changed_when: false
+      check_mode: false
+      failed_when: "'0.0.0.0' not in _pihole_blocked.stdout_lines"

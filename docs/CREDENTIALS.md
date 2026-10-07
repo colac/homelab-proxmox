@@ -23,6 +23,8 @@ decrypts one file for one command and passes on only what that tool reads:
 | Repo | File | Profile → used by | Exports |
 |---|---|---|---|
 | core | `secrets.yaml` | `packer` → `mise run packer:*` | `PKR_VAR_proxmox_api_*`, `PKR_VAR_password_hash`, `PKR_VAR_ssh_authorized_keys` (from `~/.ssh/homelab-proxmox.pub`), node/TLS flag |
+| core | `secrets.yaml` | `terraform` → `mise run dns:plan`/`dns:apply`/`dns:tf` | `TF_VAR_pm_api_*`, `TF_VAR_pm_tls_insecure`, `TF_TOKEN_app_terraform_io` (if set) |
+| core | `dns/secrets.yaml` | `dns` → `mise run dns:play` | `DNS_ZONE`, `PIHOLE_WEB_PASSWORD` |
 | monitoring | `secrets.yaml` | `terraform` → `mise run tf…` | `TF_VAR_pm_api_*`, `TF_VAR_pm_tls_insecure`, `TF_TOKEN_app_terraform_io` (if set) |
 | monitoring | `secrets.yaml` | `ansible` → `mise run play` | `ELASTIC_PASSWORD`, `KIBANA_SYSTEM_PASSWORD`, `KIBANA_ENCRYPTION_KEY`, `NEXTCLOUD_DOMAIN`, `ACME_EMAIL`, `CLOUDFLARE_DNS_API_TOKEN`, `NEXTCLOUD_SERVERINFO_TOKEN`, `PVE_EXPORTER_TOKEN_*` |
 | workloads | `secrets.yaml` | `terraform` → `mise run tf <app>` | as monitoring's `terraform` |
@@ -51,8 +53,9 @@ losing it is recoverable by re-running the roles.
 | [Proxmox endpoint](#proxmox-endpoint) | — (an address) | `proxmox_endpoint`, all three repos | Packer, Terraform |
 | [Packer Proxmox token](#packer-proxmox-token) | Proxmox | core: `proxmox_packer_token_*` | Packer |
 | [Template console password](#template-console-password) | your machine | core: `packer_password_hash` | Packer |
-| [Terraform Proxmox token](#terraform-proxmox-token) | Proxmox | monitoring + workloads: `proxmox_terraform_token_*` | Terraform |
-| [Terraform Cloud token](#terraform-cloud-token) | app.terraform.io | monitoring + workloads: `tf_cloud_token` (optional) | Terraform state |
+| [Terraform Proxmox tokens](#terraform-proxmox-token) | Proxmox | each repo's `secrets.yaml`: `proxmox_terraform_token_*` | Terraform |
+| [Terraform Cloud token](#terraform-cloud-token) | app.terraform.io | each repo: `tf_cloud_token` (optional) | Terraform state |
+| [Pi-hole admin password](#pi-hole-admin-password) | you choose | core `dns/secrets.yaml`: `pihole_web_password` (+ `dns_zone`) | Pi-hole |
 | [Cloudflare DNS tokens](#cloudflare-dns-tokens) | Cloudflare | monitoring + workloads/nextcloud: `cloudflare_dns_api_token` | Kibana's certbot; Nextcloud's Caddy |
 | [Elastic passwords and key](#elastic-passwords-and-encryption-key) | you choose | monitoring: `elastic_password`, `kibana_system_password`, `kibana_encryption_key` | Elastic Stack |
 | [Nextcloud serverinfo token](#nextcloud-serverinfo-token) | Nextcloud VM | monitoring: `nextcloud_serverinfo_token` | metrics exporter |
@@ -70,8 +73,10 @@ just kept out of the public repos.
 1. [age key](#age-key) and [SSH deploy key](#ssh-deploy-key), then clone the
    three repos side by side and `mise run setup` in each.
 2. Core: [Packer token](#packer-proxmox-token),
-   [console password](#template-console-password), `proxmox_endpoint` →
-   `mise run secrets:check`.
+   [console password](#template-console-password), `proxmox_endpoint`, its
+   [Terraform token](#terraform-proxmox-token) and the
+   [Pi-hole password](#pi-hole-admin-password) → `mise run secrets:check`, then
+   DNS first (`dns/README.md`) — everything else resolves through it.
 3. Monitoring and workloads: [Terraform token](#terraform-proxmox-token) and
    optionally the [Terraform Cloud token](#terraform-cloud-token).
 4. Workloads/nextcloud: [Cloudflare](#cloudflare-dns-tokens),
@@ -116,7 +121,10 @@ Ansible connects with the private half (`private_key_file` in each
 ssh-keygen -t ed25519 -N "" -C "homelab-proxmox-deploy" -f ~/.ssh/homelab-proxmox
 ```
 
-Every default already points at `~/.ssh/homelab-proxmox` / `.pub`.
+Every default already points at `~/.ssh/homelab-proxmox` / `.pub`. Hosts that
+are not cloned — the Raspberry Pi DNS resolver — get it from Raspberry Pi
+Imager: OS customisation → Services → Enable SSH → *Allow public-key
+authentication only*, pasting `~/.ssh/homelab-proxmox.pub`.
 Rotating means a template rebuild and re-clones — or adding the new public key
 to `~/.ssh/authorized_keys` on each live VM first, then swapping.
 
@@ -162,8 +170,16 @@ built afterwards; existing VMs keep the old one.
 
 ## Terraform Proxmox token
 
-`terraform@pve` — clone/configure rights. A different token from Packer's:
-neither should carry the other's rights. On the Proxmox node:
+Clone/configure rights, a different role from Packer's: neither should carry
+the other's. **One user per repo** that runs Terraform, all with the same
+role, so revoking one cannot break another:
+
+| Repo | Token ID |
+|---|---|
+| core (`dns/`) | `terraform-core@pve!terraform-automation-core` |
+| monitoring, workloads | `terraform@pve!terraform-automation` (per-repo users still in each TODO) |
+
+The role, once, on the Proxmox node:
 
 ```bash
 pveum role add TerraformRole -privs "Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Allocate Pool.Audit Sys.Audit Sys.Console Sys.Modify VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Migrate VM.PowerMgmt VM.GuestAgent.Audit SDN.Use"
@@ -172,10 +188,18 @@ pveum aclmod / -user terraform@pve -role TerraformRole
 pveum user token add terraform@pve terraform-automation --privsep 0   # prints the secret ONCE
 ```
 
-Store in **monitoring and workloads**: `proxmox_terraform_token_id` and
-`proxmox_terraform_token_secret`. Better, mint one token per repo
-(`terraform-monitoring`, `terraform-workloads`) under the same user, so
-revoking one cannot break the other — it is in each repo's TODO.
+A user per repo, with its token:
+
+```bash
+pveum user add terraform-core@pve
+pveum aclmod / -user terraform-core@pve -role TerraformRole
+pveum user token add terraform-core@pve terraform-automation-core --privsep 0   # prints the secret ONCE
+```
+
+Store each in **its own repo's** `secrets.yaml` as
+`proxmox_terraform_token_id` and `proxmox_terraform_token_secret`. The role
+covers LXC containers too; enabling `nesting` on an unprivileged container is
+the one feature flag Proxmox allows a non-root user to set.
 
 ## Terraform Cloud token
 
@@ -233,6 +257,18 @@ openssl rand -hex 32       # kibana_encryption_key
 | `elastic_password` | The superuser; your Kibana login | Elasticsearch only reads it on first start. Change it in Kibana (Stack Management → Users → elastic) **first**, then update the secret |
 | `kibana_system_password` | Kibana's own least-privilege account | Update the secret, then `mise run play playbooks/30-elasticsearch-security.yml playbooks/35-kibana.yml` — the bootstrap re-applies it every run |
 | `kibana_encryption_key` | Encrypts Fleet's stored tokens and API keys | **Do not rotate casually.** A new key makes the stored saved objects unreadable, and Fleet must be re-bootstrapped |
+
+## Pi-hole admin password
+
+For Pi-hole's web UI and API. It is set declaratively, like every other
+Pi-hole setting, so the UI cannot change it. Chosen by you; stored in core's
+`dns/secrets.yaml` next to `dns_zone` (the private zone its records live in):
+
+```bash
+openssl rand -base64 24
+mise run secrets:edit dns       # pihole_web_password, dns_zone
+mise run dns:play playbooks/10-pihole.yml    # applies it; also how you rotate it
+```
 
 ## Nextcloud serverinfo token
 

@@ -91,7 +91,8 @@ none of them, by design. See [Credentials](#credentials).
   `terraform init`. Bump it here first, release, then in each project.
 - **TLS verification is on** (`pm_tls_insecure = false`) because the Proxmox
   host has a valid certificate for its hostname — which only resolves through
-  PiHole. Keep PiHole as your DNS while running Terraform.
+  Pi-hole (core's `dns/`). Keep it as your DNS while running Terraform; if it
+  is down, see the break-glass section in [../dns/README.md](../dns/README.md).
 - **No IP is assigned by Terraform.** VMs take DHCP; give anything long-lived a
   DHCP reservation so its address doesn't move under Ansible's inventory.
 - **CPU lives in a `cpu { }` block** (the top-level `cores`/`sockets` are

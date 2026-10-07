@@ -1,0 +1,8 @@
+---
+# Configure the resolver, then prove it answers.
+#
+#   mise run dns:play playbooks/site.yml
+- name: Pi-hole
+  import_playbook: 10-pihole.yml
+- name: Health check
+  import_playbook: 99-healthcheck.yml

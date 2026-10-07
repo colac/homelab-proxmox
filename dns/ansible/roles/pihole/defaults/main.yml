@@ -1,0 +1,40 @@
+---
+# defaults file for pihole
+#
+# Pi-hole v6, installed natively in an LXC container, configured entirely
+# through FTLCONF_* environment variables (see templates/ftlconf.env.j2).
+# Values set that way are read-only in the web UI, so the UI cannot drift
+# from this repo — the same mechanism Pi-hole's own Docker image recommends.
+
+# The installer script is pinned so its behaviour is reproducible. It still
+# installs the latest *stable* Pi-hole (core and web reset to their newest
+# tag, FTL comes from releases/latest) — the installer offers no exact pin.
+# Bump this when Pi-hole releases a new installer.
+pihole_installer_ref: v6.4.3
+pihole_installer_url: "https://raw.githubusercontent.com/pi-hole/pi-hole/{{ pihole_installer_ref }}/automated%20install/basic-install.sh"
+
+# Upgrade an existing install with `pihole -up` on this run. Off by default:
+# upgrades are a deliberate act (`-e pihole_upgrade=true`), never a side
+# effect of applying config. Rebuilding the container is the other way.
+pihole_upgrade: false
+
+# Set in inventory/group_vars/pihole.yml.
+pihole_zone: ""
+pihole_web_password: ""
+pihole_local_records: []
+pihole_cname_records: []
+pihole_upstreams: []
+
+# LOCAL answers only clients on a directly connected subnet. Tailscale clients
+# arrive through the Nextcloud VM's subnet router, which SNATs them to its LAN
+# address, so they count as local.
+pihole_listening_mode: LOCAL
+
+# Any other Pi-hole setting, as FTLCONF key (dots → underscores) to value.
+# Example: { misc_privacylevel: 0 }
+pihole_ftlconf_extra: {}
+
+# Blocklists. Kept in Pi-hole's gravity database, not its config, so they are
+# added there; lists added by hand in the UI are left alone.
+pihole_adlists:
+  - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
