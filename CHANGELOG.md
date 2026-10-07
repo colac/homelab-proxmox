@@ -1,3 +1,11 @@
+## [2.0.1](https://github.com/colac/homelab-proxmox/compare/v2.0.0...v2.0.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **base-vm:** declare Proxmox's unset startup_shutdown values ([95af56d](https://github.com/colac/homelab-proxmox/commit/95af56d3bbdc8c882b63c4b7980304a3b55192c5))
+* **base-vm:** move cores and sockets into the cpu block ([a3afce7](https://github.com/colac/homelab-proxmox/commit/a3afce78f4f45faf367d20990b0d33c3b5bb71a0))
+
 # [2.0.0](https://github.com/colac/homelab-proxmox/compare/v1.3.1...v2.0.0) (2026-10-06)
 
 
