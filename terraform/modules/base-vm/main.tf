@@ -16,6 +16,17 @@ resource "proxmox_vm_qemu" "ubuntu_vm" {
   sockets = 1
   memory  = var.memory_mb
 
+  # Proxmox reports an unset startup/shutdown order as -1 for each field, and
+  # the provider stores that as a startup_shutdown block on every refresh.
+  # Left undeclared, every plan proposes deleting the block — and applying
+  # that changes nothing, because the next refresh reads -1 again. Declaring
+  # Proxmox's own "unset" values keeps plans clean without touching the VM.
+  startup_shutdown {
+    order            = -1
+    shutdown_timeout = -1
+    startup_delay    = -1
+  }
+
   # Disk config
   disks {
     ide {
