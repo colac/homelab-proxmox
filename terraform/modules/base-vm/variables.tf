@@ -22,6 +22,12 @@ variable "cpu_cores" {
   default = 2
 }
 
+variable "cpu_type" {
+  type        = string
+  description = "CPU type presented to the guest. Defaults to the Packer templates' vm_cpu_type; changing it on an existing VM makes the provider reboot it."
+  default     = "host"
+}
+
 variable "memory_mb" {
   type    = number
   default = 8192

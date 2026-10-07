@@ -72,11 +72,10 @@ valid action.** If you see that error, check your type names first.
 `layout` suppresses the block; anyone removing that key without fixing them will
 hit the same crashes in the same order.
 
-24.04 is what everything currently deployed was cloned from, and the Nextcloud
-project still points at it. The k3s and monitoring projects default to
-`ubuntu-26.04-template`, because their 24G `disk0_size` only makes sense against
-a template whose OS disk is actually 24G. Both templates can sit on the node at
-once, which is the point of the separate VM IDs.
+Nextcloud (workloads repo) is still cloned from 24.04. Monitoring and k3s
+use `ubuntu-26.04-template`, because their 24G `disk0_size` only makes sense
+against a template whose OS disk is actually 24G. Both templates sit on the
+node at once, which is the point of the separate VM IDs.
 
 ## Disk layout (26.04)
 
@@ -165,39 +164,15 @@ provisioner like the others — see "Ubuntu 26.04 specifics" below for why.
 ## Prerequisites
 
 - **Packer** — pinned in `mise.toml`; `mise install` from the repo root.
-- **Proxmox 9+** with an API token for a `packer@pve` user (below).
+- **Proxmox 9+.**
 - **The Ubuntu ISO uploaded to Proxmox storage** — the name must match
   `boot_iso_file` for the release you are building (see the table above).
-- **A `mkpasswd`-generated password hash** for the console user:
-  `mkpasswd -m sha-512 'yourpassword'` (from the `whois` package).
-- **An SSH keypair** whose public half goes in `ssh_authorized_keys` and whose
-  private half is `ssh_private_key_file` — these must match or the build hangs
-  at the SSH connection step. This repo uses `~/.ssh/homelab-proxmox`.
-
-### Create the Packer user in Proxmox
-
-Run in the Proxmox node console:
-
-```bash
-# create role and set privileges
-pveum role add PackerRole -privs "VM.Config.Disk VM.Config.Cloudinit SDN.Use VM.Snapshot VM.PowerMgmt Datastore.Allocate VM.GuestAgent.Unrestricted VM.Config.Network VM.Config.CDROM VM.Console VM.Backup VM.Migrate VM.Config.Options VM.Clone VM.GuestAgent.Audit VM.Snapshot.Rollback Pool.Audit VM.Config.CPU VM.Config.HWType Datastore.AllocateSpace Datastore.Audit VM.Allocate VM.Config.Memory VM.Audit"
-
-# create user (choose your own password)
-pveum user add packer@pve --password 'CHANGE_ME'
-
-# set permissions
-pveum aclmod / -user packer@pve -role PackerRole
-
-# create API token — this command prints the secret exactly once
-pveum user token add packer@pve packer-automation --privsep 0
-```
-
-Put the token ID and secret in the repo-root `secrets.yaml` as
-`proxmox_packer_token_id` / `proxmox_packer_token_secret`
-(`mise run secrets:edit`). `.mise/sops-exec packer` turns them into
-`PKR_VAR_proxmox_api_token_id` / `PKR_VAR_proxmox_api_token_secret` for the one
-`packer` command it wraps — see [Secrets](../README.md#secrets). Both release
-directories use the same profile; there is nothing per-release to set up.
+- **Credentials** in core's `secrets.yaml`: the `packer@pve` token, the
+  console password hash and `proxmox_endpoint`, plus the SSH deploy key in
+  `~/.ssh/`. How to issue each:
+  [docs/CREDENTIALS.md](../docs/CREDENTIALS.md#packer-proxmox-token).
+  `.mise/sops-exec packer` hands them to Packer as `PKR_VAR_*` for the one
+  command it wraps; both release directories use the same profile.
 
 ### Running from WSL
 
@@ -256,8 +231,29 @@ breaks every consumer whose `template_name` points at it.
 
 > Rebuilding with the same `vm_id` fails while the old template still exists.
 > Delete or renumber the previous template first. This is also why 26.04 sits at
-> 9001: it means a 26.04 build can never quietly take out the 24.04 template
-> everything is currently cloned from.
+> 9001: a 26.04 build can never quietly take out the 24.04 template Nextcloud
+> is cloned from. The IDs in the table are the repo defaults; a git-ignored
+> `variables.auto.pkrvars.hcl` can override them — this setup builds 26.04 at
+> **9006**. That file loads on every build and wins over `PKR_VAR_*`, so check
+> it first when a build uses a size or ID you did not expect.
+
+### Verify a new template
+
+Before pointing any project at a fresh template, clone it once and check the
+disk layout — the 24.04 template silently produced no LVM for months. On the
+Proxmox node (use your template's real ID):
+
+```bash
+qm clone 9006 999 --name lvm-smoke --full 1
+qm set 999 --ipconfig0 ip=dhcp && qm start 999
+# then, on the clone:
+lsblk && vgs && df -h / /home /tmp /opt   # ubuntu-vg, ~2.5G VFree, four LVs
+# then, on the node:
+qm stop 999 && qm destroy 999
+```
+
+No volume group at all means a `storage.layout` key is back in
+`user-data.yml.tpl`.
 
 ## How the build works
 
@@ -328,10 +324,9 @@ build:
   mode bundles network modules into the initrd based on the *build machine*,
   not the target, so `systemd-networkd` can DHCP the NIC before cloud-init's
   netplan rename runs, and the rename fails ("`[busy] Error renaming ... from
-  ens18 to eth0`") — but only when something (Proxmox's generated
-  network-config under a *static* IP, as `terraform/modules/base-vm` sets on
-  every clone) actually asks for that rename. A plain-DHCP Packer build never
-  triggers it. Ported from `homelab-proxmox-elastic`'s `packer/ubuntu-26.04`
+  ens18 to eth0`") — but only when a cloud-init network-config asks for that
+  rename. Proxmox generates one for every Terraform clone (`base-vm` sets
+  `ipconfig0`, DHCP); a Packer build has none and never triggers it. Ported from `homelab-proxmox-elastic`'s `packer/ubuntu-26.04`
   (its README's ADR-6), which hit this live on a Terraform-cloned VM. That
   repo runs the fix as a Packer provisioner; this one runs it from
   `late-commands` instead (base64-embedded via `locals.pkr.hcl`, decoded and
@@ -458,10 +453,45 @@ The images ship locked down by default:
 | `checksum mismatch (file change by other user?) (500)` | Cloud-init seed modified post-install | Only static files under `/etc/cloud/cloud.cfg.d` should be touched |
 | Proxy not applied | Variables not exported globally | Check `/etc/environment` and `/etc/apt/apt.conf.d/proxy.conf` |
 | `vm_id` already exists | Previous template still on the node | Delete it or change `vm_id` |
-| `403 Permission check failed (/vms/<id>, VM.Config.Cloudinit)` at "Adding a cloud-init cdrom" | The live `PackerRole` has drifted from the privilege list above — everything else in the build already succeeded, so it is the role, not the token's privsep | Re-run the `pveum role add` line above as `pveum role modify PackerRole -privs "…"` to reconcile, then answer `r` at the `-on-error=ask` prompt; the template already exists by this point, so no rebuild is needed |
+| `403 Permission check failed (/vms/<id>, VM.Config.Cloudinit)` at "Adding a cloud-init cdrom" | The live `PackerRole` has drifted from the privilege list in [CREDENTIALS.md](../docs/CREDENTIALS.md#packer-proxmox-token) — everything else in the build already succeeded, so it is the role, not the token's privsep | Re-run that `pveum role add` line as `pveum role modify PackerRole -privs "…"`, then answer `r` at the `-on-error=ask` prompt; the template already exists by this point, so no rebuild is needed |
 | Second build fails to bind port 8181 | Both releases pin the same autoinstall HTTP port | Build them one at a time |
 | 26.04 provisioner fails on a command that works on 24.04 | `sudo-rs` / Rust `coreutils` behaviour difference | Reproduce the exact command in the guest before changing the script |
 | Install fails with no space, or LVs are missing | `lv_*_size` sums above `disk_size` minus ~1.5G for BIOS/EFI/boot | Lower an LV or raise `disk_size`; there is no cross-variable check in Packer |
 | Clone has no `ubuntu-vg` at all | A `storage.layout` key crept back into `user-data.yml.tpl` and disabled `storage.config` | Remove `layout`; only `config` may be present |
-| Wait-for-cloud-init provisioner fails; VM already deleted | Cloud-init failed on the installed system's first boot — not a provisioner. Exit 1 (crashed) fails the build; exit 2 (finished, recoverable errors only — e.g. a benign "passwd ignored for existing user" warning) is logged but does not, since cloud-init's own docs define exit 2 as non-fatal | Rebuild with `-on-error=ask`, SSH in before answering the prompt, run `cloud-init status --long` and `sudo tail -80 /var/log/cloud-init.log` |
+| Wait-for-cloud-init provisioner fails; VM already deleted | Cloud-init failed on the installed system's first boot — not a provisioner. Exit 1 (crashed) fails the build; exit 2 (finished, recoverable errors only — e.g. a benign "passwd ignored for existing user" warning) is logged but does not, since cloud-init's own docs define exit 2 as non-fatal | See [Debugging a failed build](#debugging-a-failed-build) |
 | `/var/lib/docker` is still on the OS disk | No `data_disk_size` set for that project, so no scsi1 exists | Set it in the project's `variables.tf` and re-apply, then re-run `00-bootstrap.yml` |
+
+### Debugging a failed build
+
+Keep the VM alive with `mise run packer:build 26.04 -on-error=ask`, and
+inspect it before answering the prompt.
+
+**The installer crashed** (`An error occurred. Press enter to start a shell`),
+usually a storage-config error. Read, in this order:
+
+```bash
+cat /var/crash/*.crash | sed -n '/Traceback/,/^$/p'   # names the failing key/action
+grep -i 'ignoring unknown action type' /var/log/installer/subiquity-server-debug.log
+cat /var/log/installer/autoinstall-user-data          # what the installer received
+less /var/log/installer/curtin-install.log            # only if partitioning started
+python3 -m http.server 8000 --directory /var/crash    # copy the crash file off first
+```
+
+Valid storage action types (subiquity's `@fsobj(...)`): `dasd`,
+`nvme_controller`, `disk`, `partition`, `raid`, `lvm_volgroup`,
+`lvm_partition`, `dm_crypt`, `device`, `format`, `mount`, `zpool`, `zfs`.
+Anything else is skipped silently, and the error appears on a *different*
+action — see [The two templates](#the-two-templates).
+
+**Cloud-init failed on first boot** (the "wait for cloud-init" step exits 1).
+SSH to the build IP from the log, or use the Proxmox console:
+
+```bash
+sudo cloud-init status --long          # names the failed module
+sudo cloud-init analyze show           # per-stage timing
+sudo grep -iE 'error|traceback|warn' /var/log/cloud-init.log
+less /var/log/cloud-init-output.log    # stdout/stderr of every runcmd line
+```
+
+The 26.04 build hit this once (`systemd-timesyncd` missing — see
+[Ubuntu 26.04 specifics](#ubuntu-2604-specifics)).
