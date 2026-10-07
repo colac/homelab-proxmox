@@ -28,6 +28,8 @@ workloads for Nextcloud and k3s.
       `sops-exec` outright, keep `apply`/`play`/`packer build` on ask
 - [ ] **Keep `galaxy.yml`'s version in step with releases**, or have
       semantic-release write it (`@semantic-release/exec`)
+- [x] **JSON formatted like `terraform fmt`**: pre-commit's `check-json` and
+      `pretty-format-json` (2-space, key order kept)
 
 ## Templates (Packer)
 
