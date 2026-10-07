@@ -33,6 +33,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_cpu_cores"></a> [cpu\_cores](#input\_cpu\_cores) | n/a | `number` | `2` | no |
+| <a name="input_cpu_type"></a> [cpu\_type](#input\_cpu\_type) | CPU type presented to the guest. Defaults to the Packer templates' vm\_cpu\_type; changing it on an existing VM makes the provider reboot it. | `string` | `"host"` | no |
 | <a name="input_data_disk_size"></a> [data\_disk\_size](#input\_data\_disk\_size) | Docker data disk (scsi1), mounted at /var/lib/docker by the Ansible docker\_data role. This is where container data actually lives — Elasticsearch's esdata volume, Nextcloud AIO's mastercontainer volume — so it, not disk0\_size, is the retention ceiling. null means no second disk. | `string` | `null` | no |
 | <a name="input_data_disk_storage"></a> [data\_disk\_storage](#input\_data\_disk\_storage) | Proxmox storage for the docker data disk. Defaults to proxmox\_storage. Worth setting separately if the data disk should live on different backing storage than the OS disk. | `string` | `null` | no |
 | <a name="input_disk0_size"></a> [disk0\_size](#input\_disk0\_size) | OS disk size. Must be >= the Packer template's disk — Telmate cannot shrink a cloned disk. The 26.04 template ships 24G with LVM; only /opt and the OS live here. | `string` | `"24G"` | no |

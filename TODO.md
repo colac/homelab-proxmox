@@ -50,11 +50,13 @@ workloads for Nextcloud and k3s.
 
 - [x] **`startup_shutdown` drift**: every plan proposed removing the block
       Proxmox reports as `-1`. `base-vm` now declares it (`fix:` → v2.0.1)
-- [ ] **Roll out v2.0.1**: bump `?ref=` and `requirements.yml` to `v2.0.1` in
-      monitoring, then workloads; each plan should then say "No changes"
-- [ ] **`cores`/`sockets` deprecation in `modules/base-vm`.** `terraform
-      validate` warns they should move into `cpu { }`. It changes how the live
-      VMs' CPU is described — release it on its own and read each plan
+- [x] **`cores`/`sockets` deprecation**: moved into `cpu { }`, with `type`
+      declared (`host`, as the templates set it) so the move cannot change the
+      live VMs' CPU model
+- [ ] **Roll out v2.0.1** (both fixes): plan each consumer against the
+      unreleased module first (`mise run deps:dev`), release, then bump
+      `?ref=` and `requirements.yml` to `v2.0.1`; each plan should say
+      "No changes"
 
 ## DNS (homelab-wide)
 

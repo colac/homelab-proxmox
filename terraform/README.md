@@ -94,9 +94,9 @@ none of them, by design. See [Credentials](#credentials).
   PiHole. Keep PiHole as your DNS while running Terraform.
 - **No IP is assigned by Terraform.** VMs take DHCP; give anything long-lived a
   DHCP reservation so its address doesn't move under Ansible's inventory.
-- **`cores` and `sockets` are deprecated** in the provider (`cpu { … }`);
-  changing them touches every consumer's plan, so it is tracked in
-  [../TODO.md](../TODO.md) rather than done as a drive-by.
+- **CPU lives in a `cpu { }` block** (the top-level `cores`/`sockets` are
+  deprecated). Its `type` is declared, defaulting to `host` to match the
+  Packer templates — changing a VM's CPU type makes the provider reboot it.
 - **`startup_shutdown` is declared with `-1` values** on purpose: Proxmox
   reports "unset" that way, and leaving the block out makes every plan propose
   a change that never sticks.

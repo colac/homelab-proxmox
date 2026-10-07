@@ -82,5 +82,7 @@ Need credentials — ask the human first: `mise run packer:validate <release>`,
   monitoring enrolls it.
 - `base-vm` declares `startup_shutdown` with `-1` values: Proxmox reports
   "unset" that way, and omitting it makes every plan propose a no-op change.
+- `base-vm`'s `cpu { type }` is declared and matches the templates (`host`);
+  a CPU type change makes the provider reboot the VM.
 - Template names and VM IDs are a contract. Build a replacement alongside under
   a new `vm_id`; never rename one in place.

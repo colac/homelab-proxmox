@@ -12,9 +12,16 @@ resource "proxmox_vm_qemu" "ubuntu_vm" {
   # Boot from the cloned OS disk (not the cloud-init drive or network/iPXE).
   boot = "order=scsi0"
 
-  cores   = var.cpu_cores
-  sockets = 1
-  memory  = var.memory_mb
+  # The provider's cpu block replaces the deprecated top-level cores/sockets.
+  # `type` is declared, not left to the provider's default: it must match what
+  # the Packer templates set (vm_cpu_type, "host"), because a CPU type change
+  # is one of the edits that makes the provider reboot the VM.
+  cpu {
+    cores   = var.cpu_cores
+    sockets = 1
+    type    = var.cpu_type
+  }
+  memory = var.memory_mb
 
   # Proxmox reports an unset startup/shutdown order as -1 for each field, and
   # the provider stores that as a startup_shutdown block on every refresh.

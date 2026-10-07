@@ -25,8 +25,9 @@ mise tasks                    # everything this repo can run
 ```
 
 `setup` installs the Ansible collections last, from core's release tag. To try
-an unreleased core change, `mise run deps:dev` installs the sibling checkout
-instead; `mise run deps` puts the pin back.
+an unreleased core change, `mise run deps:dev` uses the sibling checkout
+instead — for the Ansible collection and for Terraform's `base-vm` alike;
+`mise run deps` puts the pins back.
 
 Credentials need their own one-time setup — see
 [CREDENTIALS.md](CREDENTIALS.md). Per-machine settings (say, the LAN NIC
@@ -87,16 +88,21 @@ design — run them through the tasks.
 Core's module, collection and templates reach a VM only when a consumer bumps
 its pin, one consumer at a time:
 
-1. Change core, `mise run lint`, merge with a Conventional Commit. The Release
-   workflow tags `vX.Y.Z`.
-2. In one consumer, bump the tag in every place it is pinned — they move
+1. Change core and `mise run lint`. **Before merging**, test the change
+   against the live VMs: in each consumer, `mise run deps:dev` points both the
+   Ansible collection and Terraform's `base-vm` at your core checkout (the
+   latter through a git-ignored `dev_override.tf`), so `mise run tf:plan` and
+   `--check --diff` runs show exactly what the release would do.
+   `mise run deps` switches back to the pins.
+2. Merge with a Conventional Commit. The Release workflow tags `vX.Y.Z`.
+3. In one consumer, bump the tag in every place it is pinned — they move
    together, so a repo is always on one core version:
    - `?ref=vX.Y.Z` in each `terraform/main.tf`
    - `version: vX.Y.Z` in each `ansible/requirements.yml`
-3. `mise run deps`, then read the plan and the check-mode diff before applying:
+4. `mise run deps`, then read the plan and the check-mode diff before applying:
    `mise run tf:plan` and `mise run play playbooks/00-bootstrap.yml --check --diff`
    (with the app name first in workloads).
-4. Healthy → the next consumer. Not healthy → move the pin back.
+5. Healthy → the next consumer. Not healthy → move the pin back.
 
 A template change is different: build the new one alongside the old under a
 new `vm_id`, then change `template_name` per project and re-clone.
