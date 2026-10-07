@@ -1,3 +1,15 @@
+# [2.1.0](https://github.com/colac/homelab-proxmox/compare/v2.0.1...v2.1.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* **packer:** point new templates at the Pi-hole at 192.168.1.153 ([a764071](https://github.com/colac/homelab-proxmox/commit/a76407186f1378d28d802d508bc563013ff8b514))
+
+
+### Features
+
+* **dns:** run the LAN's Pi-hole as code in core ([9c90aee](https://github.com/colac/homelab-proxmox/commit/9c90aee76605931f634e047570de9357a128880f))
+
 ## [2.0.1](https://github.com/colac/homelab-proxmox/compare/v2.0.0...v2.0.1) (2026-10-07)
 
 
