@@ -8,7 +8,7 @@ its internals; this is the page that ties them together.
 
 | Layer | Repo | Owns | Changes |
 |---|---|---|---|
-| **core** | [homelab-proxmox](https://github.com/colac/homelab-proxmox) (this) | Packer templates, the `base-vm` Terraform module, the `colac.homelab` Ansible collection (`common`, `docker_data`), homelab-wide docs, TrueNAS notes | Rarely; everything else depends on it |
+| **core** | [homelab-proxmox](https://github.com/colac/homelab-proxmox) (this) | Packer templates, the `base-vm` Terraform module, the `colac.homelab` Ansible collection (`common`, `docker_data`), **DNS** (Pi-hole, `dns/`), homelab-wide docs, TrueNAS notes | Rarely; everything else depends on it |
 | **monitoring** | [homelab-proxmox-monitoring](https://github.com/colac/homelab-proxmox-monitoring) | The monitoring VM: single-node Elasticsearch, Kibana, Fleet Server, exporters — and Elastic Agent enrollment on **every** host | Medium |
 | **workloads** | [homelab-proxmox-workloads](https://github.com/colac/homelab-proxmox-workloads) | The apps, one folder each: Nextcloud (live), k3s (VM only) | Often |
 
@@ -34,6 +34,7 @@ flowchart TB
     pk["Packer<br/>ubuntu-24.04-template (9000)<br/>ubuntu-26.04-template (9001)"]
     bv["Terraform module<br/>base-vm"]
     cl["Ansible collection<br/>colac.homelab<br/>common · docker_data"]
+    dns["dns/ — Pi-hole<br/>Terraform + Ansible<br/>pihole_local_records"]
   end
 
   subgraph mon["monitoring — homelab-proxmox-monitoring"]
@@ -53,6 +54,7 @@ flowchart TB
   bv -- "git tag ?ref=vX" --> mtf & ntf & ktf
   cl -- "requirements.yml tag" --> man & nan
   wl -- "agent targets (inventory/hosts.yml)" --> man
+  mon & wl -- "DNS records: a PR to core" --> dns
 ```
 
 ## Contracts between the layers
@@ -69,7 +71,7 @@ down here. Nothing else may.
 | `colac.homelab` collection | core → every Ansible tree | `requirements.yml`: `…homelab-proxmox.git#/ansible/`, `version: vX.Y.Z` | Release a tag; bump one consumer; `00-bootstrap.yml --check --diff` |
 | Agent targets | workloads → monitoring | Host + address in monitoring's `ansible/inventory/hosts.yml` (group `agents`) | Add/remove the entry; run `20` and `50` with `--limit` |
 | Nextcloud metrics | workloads → monitoring | `nextcloud_serverinfo_token`, minted on the VM, stored in monitoring's `secrets.yaml` | Re-mint, update monitoring's secret, re-run `45-exporters.yml` |
-| Private DNS names | each layer → PiHole | A records (`nextcloud.<zone>`, `kibana.<zone>`, `pve.<zone>`), set by hand | Moving these into core as code is a TODO |
+| Private DNS names | each layer → core | A records (`nextcloud.<zone>`, `kibana.<zone>`, `pve.<zone>`) in `pihole_local_records`, `dns/ansible/inventory/group_vars/pihole.yml` | A PR to core, then `mise run dns:play playbooks/10-pihole.yml` |
 | Toolchain pins | core → all | Same versions in every `mise.toml` (Terraform 1.15.7, ansible-core 2.17.14, …) | Bump in core first, then the others |
 
 ## Runtime view
@@ -84,12 +86,13 @@ flowchart TB
   off(["Off-LAN devices"])
 
   subgraph lan["LAN 192.168.1.0/24"]
-    pihole["PiHole<br/>LAN DNS · private A records"]
-    subgraph pve["Proxmox VE — pve"]
+    router["Router 192.168.1.1<br/>DHCP · hands out DNS"]
+    pi["Raspberry Pi 192.168.1.53 (core)<br/>primary DNS — planned"]
+    subgraph pve["Proxmox VE — pve 192.168.1.169"]
+      pihole["LXC pihole-ct 192.168.1.153 (core)<br/>LAN DNS — live"]
       tpl["templates 9000 / 9001<br/>(core)"]
-      nc["VM nextcloud (workloads)<br/>Caddy · Nextcloud AIO<br/>Tailscale subnet router<br/>Elastic Agent"]
-      k3s["VM k3s (workloads)<br/>not configured yet"]
-      mon["VM monitoring (monitoring)<br/>Elasticsearch · Kibana<br/>Fleet Server · exporters<br/>Elastic Agent"]
+      nc["VM nextcloud 192.168.1.43 (workloads)<br/>Caddy · Nextcloud AIO<br/>Tailscale subnet router<br/>Elastic Agent"]
+      mon["VM monitoring 192.168.1.87 (monitoring)<br/>Elasticsearch · Kibana<br/>Fleet Server · exporters<br/>Elastic Agent"]
     end
     nas[("TrueNAS<br/>ZFS mirror · SMB media<br/>netdata")]
   end
@@ -100,15 +103,24 @@ flowchart TB
   mon -- "serverinfo API via Caddy" --> nc
   nc & mon -- "DNS-01" --> cf
   cf --- internet
-  off -- "Tailscale subnet route<br/>+ split-DNS to PiHole" --> nc
-  lan -. resolves via .-> pihole
+  off -- "Tailscale subnet route<br/>+ split-DNS to Pi-hole" --> nc
+  router -. "DNS server 1" .-> pihole
+  router -. "later: server 1 → Pi, 2 → container" .-> pi
+  pihole & pi -- "upstreams" --> internet
+
+  classDef planned stroke-dasharray: 5 5
+  class pi planned
 ```
+
+The k3s VM is not deployed (workloads keeps its Terraform recipe), and the
+Raspberry Pi is planned — dashed above.
 
 - **Nothing is exposed to the internet.** Cloudflare only answers ACME DNS-01
   challenges, so services get real Let's Encrypt certificates for names that
-  resolve only through PiHole.
+  resolve only through Pi-hole.
 - **Off-LAN reach is Tailscale:** the Nextcloud VM advertises the LAN as a
-  subnet route, and split-DNS sends the zone's lookups to PiHole.
+  subnet route, and split-DNS sends the zone's lookups to Pi-hole
+  (`192.168.1.153`).
 - **Data lives on TrueNAS**, mounted by apps over SMB, never on a VM disk.
   VM disks hold only rebuildable state and named Docker volumes on a separate
   data disk.
@@ -198,16 +210,27 @@ The same in every repo — mise for tools and entry points, Conventional
 Commits and semantic-release for versions, one `AGENTS.md` per repo (plus one
 per app in workloads) for AI agents. See [DEVELOPMENT.md](DEVELOPMENT.md).
 
-## DNS today, and where it is heading
+## DNS
 
-PiHole is the LAN's only resolver and holds the private A records every
+Pi-hole is the LAN's only resolver and holds the private A records every
 service depends on — including `pve.<zone>`, which Packer and Terraform need
-to reach the Proxmox API with TLS verification on. It runs outside all three
-repos and nothing monitors it, which makes it the homelab's least-managed
-single point of failure.
+to reach the Proxmox API with TLS verification on. It is a **platform
+service in core** (`dns/`), designed as two hosts with one configuration:
 
-The direction (core's TODO): bring PiHole into core as code, with the records
-as one list rendered by Ansible, and a second instance off the Proxmox host so
-DNS survives the hypervisor. CoreDNS as an authoritative zone with transfers
-to a secondary is the step after that, worth it once k3s wants wildcard
-records or the record list grows — not before.
+| Resolver | Address | Role | Status |
+|---|---|---|---|
+| LXC container `pihole-ct` | `192.168.1.153` | failover; created by Terraform | **live** since 2026-10-07 — today the only resolver |
+| Raspberry Pi `pihole-pi` | `192.168.1.53` | primary; physical, so DNS survives a Proxmox outage | planned |
+
+The same Ansible role configures both through Pi-hole's own `FTLCONF_*`
+settings, which the web UI shows as read-only, so either can answer any query.
+The record list is code, and another repo's service gets its name by a PR to
+it. Runbook, including a diagram of how a query and a config change flow:
+[dns/README.md](../dns/README.md).
+
+Until the Pi exists, DNS shares the hypervisor's fate: if Proxmox is down, so is
+name resolution — and with it `pve.<zone>`, the name Terraform needs to fix
+anything. The runbook's break-glass section covers that. Still ahead (core's
+TODO): the Pi, and monitoring both resolvers from the monitoring repo. CoreDNS as an authoritative zone with transfers to a
+secondary is the step after that — worth it once k3s wants wildcard records
+or the record list grows, not before.

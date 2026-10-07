@@ -1,0 +1,7 @@
+# Seeded by Ansible (role: pihole) before the first install, and never again.
+# Its only job is to exist: Pi-hole's installer treats a missing pihole.toml as
+# a fresh install and opens interactive dialogs. From here on the file is
+# Pi-hole's own — every setting that matters comes from FTLCONF_* variables
+# (/etc/pihole/ftlconf.env), which override it.
+[dns]
+  upstreams = [ {{ pihole_upstreams | map('to_json') | join(', ') }} ]

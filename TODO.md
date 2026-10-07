@@ -23,11 +23,14 @@ workloads for Nextcloud and k3s.
 - [x] **Docs centralised in `docs/`**: `CREDENTIALS.md` (every credential:
       issue, store, rotate), `DEVELOPMENT.md` (tools, conventions, releases);
       `AGENTS.md` per repo, imported by a one-line `CLAUDE.md`
-- [ ] **Revisit the committed `.claude/settings.json` in all three repos**:
+- [x] **Revisit the committed `.claude/settings.json` in all three repos**:
       swap the `make`/`.venv` entries for the mise tasks, deny `sops -d` and
       `sops-exec` outright, keep `apply`/`play`/`packer build` on ask
-- [ ] **Keep `galaxy.yml`'s version in step with releases**, or have
-      semantic-release write it (`@semantic-release/exec`)
+- [x] **`galaxy.yml`'s version follows releases**: `@semantic-release/exec`
+      rewrites it and the release commit includes it. It stays `2.0.0` until
+      the first release after this lands
+- [x] **JSON formatted like `terraform fmt`**: pre-commit's `check-json` and
+      `pretty-format-json` (2-space, key order kept)
 
 ## Templates (Packer)
 
@@ -53,21 +56,44 @@ workloads for Nextcloud and k3s.
 - [x] **`cores`/`sockets` deprecation**: moved into `cpu { }`, with `type`
       declared (`host`, as the templates set it) so the move cannot change the
       live VMs' CPU model
-- [ ] **Roll out v2.0.1** (both fixes): plan each consumer against the
+- [x] **Roll out v2.0.1** (both fixes): plan each consumer against the
       unreleased module first (`mise run deps:dev`), release, then bump
       `?ref=` and `requirements.yml` to `v2.0.1`; each plan should say
       "No changes"
 
 ## DNS (homelab-wide)
 
-- [ ] **PiHole as code, in core.** It runs on the Proxmox host outside every
-      repo, is not monitored, and holds the A records everything depends on
-      (`pve.<zone>` included — Packer and Terraform need it). Bring its config
-      and the record list into core, rendered by Ansible
-- [ ] **A second resolver off the Proxmox host** (TrueNAS app or a Pi), from
-      the same config, handed out by DHCP — today DNS dies with the hypervisor
+- [x] **Pi-hole as code, in core** (`dns/`): one role and one configuration
+      for two resolvers, through `FTLCONF_*` (read-only in the UI); the record
+      list is `dns/ansible/inventory/group_vars/pihole.yml`
+- [x] **Deployed the container** `pihole-ct` at `192.168.1.153` (2026-10-07,
+      Terraform workspace `DNS`, health check green) and made it the router's
+      DNS server; the hand-built Pi-hole at `.53` is stopped
+- [ ] **Tailscale split-DNS → `192.168.1.153`** — it still names `.53`, which
+      is stopped, so off-LAN devices cannot resolve the zone until it changes
+- [ ] **Delete the hand-built Pi-hole container** after a quiet week (from
+      2026-10-14) — until then `pct start` on it is the rollback
+- [ ] **Router:** DHCP reservation for `.153` (`BC:24:11:00:01:53`), and check
+      what it advertises as IPv6 DNS. Server 2: not a public resolver (it
+      leaks ads and breaks private names at random) — leave it empty or `.153`
+      until the Pi exists, then `.153` with the Pi as server 1
+- [ ] **Later — add the Raspberry Pi as primary** at `192.168.1.53`
+      (Raspberry Pi OS Lite 64-bit, configured by the same playbook). Until
+      then DNS goes down with Proxmox. Image it from the repo, not by hand:
+      Raspberry Pi OS on Debian 13 provisions first boot with cloud-init, and
+      `rpi-imager --cli` takes the files (`--cloudinit-userdata`,
+      `--cloudinit-networkconfig`). So: tracked `dns/raspberry-pi/user-data`
+      (hostname, user, deploy key, no password login over SSH) and
+      `network-config` (**static `.53` on the Pi itself**, so it needs no DHCP
+      reservation), the console password hash in `dns/secrets.yaml`, and a
+      `mise run dns:pi-image <device>` task that renders them through
+      sops-exec and flashes the card. Build it when the Pi is in hand, so it
+      is tested against the real thing
+- [ ] **Monitor them**: add both to the monitoring repo's agent targets
+- [ ] **Move `home-nas.local` into the zone** (`nas.<zone>`): `.local` is
+      mDNS's, and some clients never ask Pi-hole for it
 - [ ] **CoreDNS** as an authoritative zone with transfers to the secondary —
-      only once k3s needs wildcard records or the record list outgrows PiHole
+      only once k3s needs wildcard records or the record list outgrows Pi-hole
 
 ## Repo / tooling
 

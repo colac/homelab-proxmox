@@ -1,0 +1,153 @@
+---
+# tasks file for pihole
+
+- name: Assert the zone and the admin password are set
+  ansible.builtin.assert:
+    that:
+      - pihole_zone | length > 0
+      - pihole_web_password | length > 0
+      - pihole_upstreams | length > 0
+    fail_msg: >-
+      DNS_ZONE and/or PIHOLE_WEB_PASSWORD resolved empty. They come from
+      dns/secrets.yaml, which only `mise run dns:play …` decrypts: set
+      dns_zone and pihole_web_password with `mise run secrets:edit dns`,
+      confirm with `mise run secrets:check`, and run the playbook through mise.
+    quiet: true
+
+- name: Start the record lists Pi-hole reads empty
+  ansible.builtin.set_fact:
+    pihole_ftl_hosts: []
+    pihole_ftl_cnames: []
+
+- name: Render the host lines ("IP name")
+  ansible.builtin.set_fact:
+    pihole_ftl_hosts: "{{ pihole_ftl_hosts + [item.ip ~ ' ' ~ (item.fqdn if item.fqdn is defined else item.name ~ '.' ~ pihole_zone)] }}"
+  loop: "{{ pihole_local_records }}"
+  loop_control:
+    label: "{{ item.fqdn if item.fqdn is defined else item.name }}"
+
+- name: Render the CNAME lines ("name,target")
+  ansible.builtin.set_fact:
+    pihole_ftl_cnames: "{{ pihole_ftl_cnames + [(item.fqdn if item.fqdn is defined else item.name ~ '.' ~ pihole_zone) ~ ',' ~ item.target] }}"
+  loop: "{{ pihole_cname_records }}"
+  loop_control:
+    label: "{{ item.fqdn if item.fqdn is defined else item.name }}"
+
+- name: Install the packages the installer and the health check need
+  ansible.builtin.apt:
+    name:
+      - curl
+      - ca-certificates
+      - git
+      - bind9-dnsutils
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure /etc/pihole exists
+  ansible.builtin.file:
+    path: /etc/pihole
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Create-only (force: false): it exists so the installer runs unattended, and
+# Pi-hole rewrites it on every start. Re-templating it would show a change on
+# every run and fight Pi-hole — FTLCONF_* below is where settings live.
+- name: Seed pihole.toml so the installer runs unattended
+  ansible.builtin.template:
+    src: pihole.toml.j2
+    dest: /etc/pihole/pihole.toml
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Render the FTLCONF settings (holds the admin password)
+  ansible.builtin.template:
+    src: ftlconf.env.j2
+    dest: /etc/pihole/ftlconf.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart pihole-FTL
+
+- name: Ensure the pihole-FTL drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/pihole-FTL.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Load the FTLCONF settings into pihole-FTL
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/pihole-FTL.service.d/10-ftlconf.conf
+    content: |
+      # Managed by Ansible (role: pihole).
+      [Service]
+      EnvironmentFile=/etc/pihole/ftlconf.env
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart pihole-FTL
+
+- name: Download the pinned Pi-hole installer
+  ansible.builtin.get_url:
+    url: "{{ pihole_installer_url }}"
+    dest: /root/pihole-basic-install.sh
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install Pi-hole (unattended; skipped once installed)
+  ansible.builtin.command:
+    cmd: bash /root/pihole-basic-install.sh --unattended
+    creates: /usr/local/bin/pihole
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  notify: Restart pihole-FTL
+
+- name: Upgrade Pi-hole (only with -e pihole_upgrade=true)
+  ansible.builtin.command: pihole -up
+  register: _pihole_upgrade
+  changed_when: "'up to date' not in _pihole_upgrade.stdout"
+  when: pihole_upgrade | bool
+
+- name: Apply the configuration now, not at the end of the play
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure pihole-FTL is enabled and running
+  ansible.builtin.systemd_service:
+    name: pihole-FTL
+    state: started
+    enabled: true
+
+# Adlists live in the gravity database, not in pihole.toml, so FTLCONF cannot
+# set them. INSERT OR IGNORE keys on the unique address: re-runs change
+# nothing, and lists added by hand in the UI are never removed.
+- name: Ensure each managed adlist is present
+  ansible.builtin.command:
+    argv:
+      - pihole-FTL
+      - sqlite3
+      - /etc/pihole/gravity.db
+      - >-
+        INSERT OR IGNORE INTO adlist (address, enabled, comment)
+        VALUES ('{{ item | replace("'", "''") }}', 1, 'managed by ansible');
+        SELECT changes();
+  loop: "{{ pihole_adlists }}"
+  register: _pihole_adlist
+  changed_when: _pihole_adlist.stdout | trim != '0'
+  notify: Update gravity
+
+- name: Read the installed versions
+  ansible.builtin.command: pihole version
+  register: _pihole_version
+  changed_when: false
+  check_mode: false
+
+- name: Report the installed versions
+  ansible.builtin.debug:
+    msg: "{{ _pihole_version.stdout_lines }}"

@@ -293,7 +293,7 @@ variable "nameservers" {
   type        = list(string)
   description = "DNS nameservers for the VM (first is primary)."
   default = [
-    "192.168.1.53",
+    "192.168.1.153",
     "1.1.1.1"
   ]
 }

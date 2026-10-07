@@ -57,18 +57,20 @@ description = "Every pre-commit hook on every file, then ansible-lint"
 run = ["pre-commit run --all-files", { task = "lint:ansible" }]
 
 [tasks."lint:ansible"]
-description = "ansible-lint (production profile) on the colac.homelab collection"
-dir = "{{config_root}}/ansible"
-run = "ansible-lint"
+description = "ansible-lint (production profile) on the colac.homelab collection and dns/ansible"
+run = '''
+(cd ansible && ansible-lint)
+(cd dns/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml --syntax-check)
+'''
 
 [tasks."tf:validate"]
-description = "terraform fmt + validate the base-vm module (no backend, no credentials)"
-dir = "{{config_root}}/terraform/modules/base-vm"
-run = [
-  "terraform fmt -check -recursive",
-  "terraform init -backend=false -input=false >/dev/null",
-  "terraform validate",
-]
+description = "terraform fmt + validate base-vm and dns/terraform (no backend, no credentials)"
+run = '''
+for d in terraform/modules/base-vm dns/terraform; do
+  echo "== $d"
+  (cd "$d" && terraform fmt -check -recursive && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1
+done
+'''
 
 [tasks."release:dry-run"]
 description = "Show the version semantic-release would cut next"
@@ -78,15 +80,55 @@ run = "semantic-release --no-ci --dry-run"
 # Secrets
 # --------------------------------------------------------------------------
 [tasks."secrets:edit"]
-description = "Open secrets.yaml decrypted in VS Code; re-encrypts on save"
-run = "sops secrets.yaml"
+description = "Edit a secrets file in VS Code: no argument = ./secrets.yaml (Packer, Terraform), or `dns`"
+# mise appends arguments to the run line; `bash -c '…' name` turns them into
+# positional parameters, so "$1" is the folder (or nothing).
+run = """bash -c 'sops "${1:+$1/}secrets.yaml"' secrets:edit"""
 # Hand the terminal straight to sops and its editor (SOPS_EDITOR in [env]).
 # Without it mise sits between them.
 raw = true
 
 [tasks."secrets:check"]
-description = "Verify secrets.yaml has every key Packer needs (prints names, never values)"
-run = ".mise/sops-exec --check packer"
+description = "Verify every secrets file has the keys its consumer needs (names only, never values)"
+run = [
+  ".mise/sops-exec --check packer",
+  ".mise/sops-exec --check terraform",
+  ".mise/sops-exec --check dns",
+]
+
+# --------------------------------------------------------------------------
+# DNS — the Pi-hole container (dns/). A platform service: everything else
+# resolves through it, Packer and Terraform included.
+# --------------------------------------------------------------------------
+[tasks."dns:tf"]
+description = "Any terraform command for the Pi-hole container: mise run dns:tf state list"
+dir = "{{config_root}}/dns/terraform"
+run = "{{config_root}}/.mise/sops-exec terraform terraform"
+
+[tasks."dns:plan"]
+description = "terraform init + plan for the Pi-hole container"
+dir = "{{config_root}}/dns/terraform"
+run = [
+  "{{config_root}}/.mise/sops-exec terraform terraform init -input=false",
+  "{{config_root}}/.mise/sops-exec terraform terraform plan",
+]
+
+[tasks."dns:apply"]
+description = "terraform apply for the Pi-hole container (also writes dns/ansible/inventory/pihole.yml)"
+dir = "{{config_root}}/dns/terraform"
+run = "{{config_root}}/.mise/sops-exec terraform terraform apply"
+
+[tasks."dns:play"]
+description = "ansible-playbook for Pi-hole with its secrets: mise run dns:play playbooks/site.yml"
+dir = "{{config_root}}/dns/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
+run = "{{config_root}}/.mise/sops-exec dns ansible-playbook"
+
+[tasks."dns:inventory"]
+description = "Show the Pi-hole inventory (no credentials)"
+dir = "{{config_root}}/dns/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
+run = "ansible-inventory --graph"
 
 # --------------------------------------------------------------------------
 # Packer — the templates every other layer clones

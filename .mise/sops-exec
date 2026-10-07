@@ -14,7 +14,7 @@
 # `eval` would re-parse the plaintext as shell, and any value with a space,
 # quote or `$` would break or be word-split.
 #
-# Profiles in this repo: packer.
+# Profiles in this repo: packer, terraform, dns.
 # The same script, with different profiles, lives in each homelab repo.
 set -euo pipefail
 
@@ -64,6 +64,24 @@ want() {
 # put VAR KEY — export VAR with the value of secret KEY.
 put() { export "$1=${S[$2]:-}"; }
 
+# terraform_env FILE — the Proxmox API and Terraform Cloud credentials every
+# Terraform project in the homelab reads (variables pm_api_*).
+terraform_env() {
+  load "$1"
+  need proxmox_endpoint proxmox_terraform_token_id proxmox_terraform_token_secret
+  want tf_cloud_token
+  local endpoint=${S[proxmox_endpoint]:-}
+  export TF_VAR_pm_api_url="${endpoint%/}/api2/json"
+  put TF_VAR_pm_api_token_id proxmox_terraform_token_id
+  put TF_VAR_pm_api_token_secret proxmox_terraform_token_secret
+  # Non-secret, from mise.toml [env] (override in mise.local.toml).
+  export TF_VAR_pm_tls_insecure=${PROXMOX_TLS_INSECURE:-false}
+  # Empty = fall back to `terraform login` (~/.terraform.d/credentials.tfrc.json).
+  if [[ -n ${S[tf_cloud_token]:-} ]]; then
+    put TF_TOKEN_app_terraform_io tf_cloud_token
+  fi
+}
+
 case $profile in
   packer)
     load "$root/secrets.yaml"
@@ -89,8 +107,20 @@ case $profile in
       missing+=("$pub (deploy key, public half)")
     fi
     ;;
+  terraform)
+    # Platform services' Terraform (dns/terraform). Infra credentials only.
+    terraform_env "$root/secrets.yaml"
+    ;;
+  dns)
+    # Pi-hole's own secrets, from dns/secrets.yaml. Read back by
+    # lookup('env', …) in dns/ansible/inventory/group_vars/pihole.yml.
+    load "$root/dns/secrets.yaml"
+    need dns_zone pihole_web_password
+    put DNS_ZONE dns_zone
+    put PIHOLE_WEB_PASSWORD pihole_web_password
+    ;;
   *)
-    echo "sops-exec: unknown profile '$profile' (this repo has: packer)" >&2
+    echo "sops-exec: unknown profile '$profile' (this repo has: packer, terraform, dns)" >&2
     exit 2
     ;;
 esac

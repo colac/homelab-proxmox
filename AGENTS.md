@@ -7,9 +7,10 @@ rules below are the ones that must hold in every session.
 ## What this repo is
 
 The core layer of a three-repo Proxmox homelab: Packer templates, the
-`base-vm` Terraform module, and the `colac.homelab` Ansible collection
-(`common`, `docker_data`). It runs no Terraform and has no inventory — it never
-touches a running VM. Siblings in `~/git-repos/`:
+`base-vm` Terraform module, the `colac.homelab` Ansible collection
+(`common`, `docker_data`) — and one platform service, **DNS** (`dns/`: Pi-hole
+in an LXC container). Apart from `dns/`, nothing here touches a running
+machine. Siblings in `~/git-repos/`:
 
 - `homelab-proxmox-monitoring` — the Elastic Stack VM, agents on every host
 - `homelab-proxmox-workloads` — the apps (Nextcloud, k3s), one folder each
@@ -24,6 +25,8 @@ what consumers must do. Elastic and Nextcloud work belongs in those repos.
   between repos**; update it whenever one changes
 - [docs/CREDENTIALS.md](docs/CREDENTIALS.md) — every credential: issue, store,
   rotate, add
+- [dns/README.md](dns/README.md) and [dns/AGENTS.md](dns/AGENTS.md) — the LAN
+  resolver; read before touching `dns/`
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — mise tasks, conventions,
   releasing and bumping pins
 - [packer/README.md](packer/README.md), [terraform/README.md](terraform/README.md),
@@ -41,7 +44,8 @@ mise run secrets:check                            # missing key names only
 ```
 
 Need credentials — ask the human first: `mise run packer:validate <release>`,
-`mise run packer:build <release>`.
+`mise run packer:build <release>`, and every `mise run dns:*` except
+`dns:inventory`.
 
 ## Rules
 

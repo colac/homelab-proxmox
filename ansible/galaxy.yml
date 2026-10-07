@@ -9,8 +9,9 @@
 #     version: v2.0.0
 #
 # The git tag is the version consumers pin. `version` below is required by
-# ansible-galaxy but does not select anything — bump it on a breaking role
-# change so `ansible-galaxy collection list` tells installs apart.
+# ansible-galaxy but does not select anything; semantic-release rewrites it on
+# every release (.releaserc.js), so it always matches the tag. Never edit it.
+# It reads 2.0.0 until the first release after that automation landed.
 namespace: colac
 name: homelab
 version: 2.0.0

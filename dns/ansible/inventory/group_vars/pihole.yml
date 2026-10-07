@@ -1,0 +1,31 @@
+---
+# The resolver's configuration — the single source of truth for the LAN's
+# private names. Change it here and run `mise run dns:play playbooks/site.yml`;
+# the web UI shows every setting below as read-only.
+#
+# Secrets and the zone name come from the environment (dns/secrets.yaml via
+# .mise/sops-exec), so the real domain never appears in this repo.
+pihole_zone: "{{ lookup('env', 'DNS_ZONE') }}"
+pihole_web_password: "{{ lookup('env', 'PIHOLE_WEB_PASSWORD') }}"
+
+# A records. `name` is relative to pihole_zone; `fqdn` is used as written.
+# Other repos' services get their record by a PR here — this list is the
+# contract (core's docs/ARCHITECTURE.md).
+pihole_local_records:
+  - name: pve              # Proxmox API — Packer and Terraform reach it by this name
+    ip: 192.168.1.169
+  - name: nextcloud        # workloads repo — Caddy's certificate names it
+    ip: 192.168.1.43
+  - name: kibana           # monitoring repo — kibana_fqdn
+    ip: 192.168.1.87
+  - fqdn: home-nas.local   # carried over from the hand-built Pi-hole
+    ip: 192.168.1.69
+
+# CNAME records, as {name|fqdn, target}. None today.
+pihole_cname_records: []
+
+# Where everything else is resolved. Cloudflare and Quad9: two operators, so
+# one outage does not take name resolution with it.
+pihole_upstreams:
+  - 1.1.1.1
+  - 9.9.9.9

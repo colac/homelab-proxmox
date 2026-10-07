@@ -1,0 +1,18 @@
+---
+# Resolvers NOT created by Terraform — today the Raspberry Pi. Copy to
+# hosts.yml (git-ignored) and fill in. The container (pihole-ct) comes from
+# inventory/pihole.yml, which dns/terraform generates; both end up in the
+# `pihole` group, so they get the same configuration.
+all:
+  children:
+    pihole:
+      hosts:
+        pihole-pi:
+          # The temporary DHCP address while you first configure it, then
+          # 192.168.1.53 once the router reserves that for the Pi's MAC.
+          ansible_host: 192.168.1.53
+          # The user created in Raspberry Pi Imager, with the deploy key's
+          # public half as its only SSH login. Raspberry Pi OS gives that user
+          # passwordless sudo, which ansible_become uses.
+          ansible_user: CHANGE_ME
+          ansible_become: true
