@@ -23,7 +23,7 @@ workloads for Nextcloud and k3s.
 - [x] **Docs centralised in `docs/`**: `CREDENTIALS.md` (every credential:
       issue, store, rotate), `DEVELOPMENT.md` (tools, conventions, releases);
       `AGENTS.md` per repo, imported by a one-line `CLAUDE.md`
-- [ ] **Revisit the committed `.claude/settings.json` in all three repos**:
+- [x] **Revisit the committed `.claude/settings.json` in all three repos**:
       swap the `make`/`.venv` entries for the mise tasks, deny `sops -d` and
       `sops-exec` outright, keep `apply`/`play`/`packer build` on ask
 - [x] **`galaxy.yml`'s version follows releases**: `@semantic-release/exec`
