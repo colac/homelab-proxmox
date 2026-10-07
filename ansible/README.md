@@ -51,9 +51,9 @@ directory over the pinned one; `mise run deps` puts the pin back.
    `00-bootstrap.yml` with `--check --diff` first. Full steps:
    [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#releasing-a-core-change).
 
-Bump `version:` in [`galaxy.yml`](galaxy.yml) on a breaking change too. It
-does not select anything (the tag does), but it is what
-`ansible-galaxy collection list` shows.
+`version:` in [`galaxy.yml`](galaxy.yml) is written by semantic-release on
+every release, so `ansible-galaxy collection list` shows the tag consumers
+installed. Never edit it by hand.
 
 ## `common`
 

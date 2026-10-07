@@ -26,8 +26,9 @@ workloads for Nextcloud and k3s.
 - [ ] **Revisit the committed `.claude/settings.json` in all three repos**:
       swap the `make`/`.venv` entries for the mise tasks, deny `sops -d` and
       `sops-exec` outright, keep `apply`/`play`/`packer build` on ask
-- [ ] **Keep `galaxy.yml`'s version in step with releases**, or have
-      semantic-release write it (`@semantic-release/exec`)
+- [x] **`galaxy.yml`'s version follows releases**: `@semantic-release/exec`
+      rewrites it and the release commit includes it. It stays `2.0.0` until
+      the first release after this lands
 - [x] **JSON formatted like `terraform fmt`**: pre-commit's `check-json` and
       `pretty-format-json` (2-space, key order kept)
 
@@ -55,7 +56,7 @@ workloads for Nextcloud and k3s.
 - [x] **`cores`/`sockets` deprecation**: moved into `cpu { }`, with `type`
       declared (`host`, as the templates set it) so the move cannot change the
       live VMs' CPU model
-- [ ] **Roll out v2.0.1** (both fixes): plan each consumer against the
+- [x] **Roll out v2.0.1** (both fixes): plan each consumer against the
       unreleased module first (`mise run deps:dev`), release, then bump
       `?ref=` and `requirements.yml` to `v2.0.1`; each plan should say
       "No changes"
