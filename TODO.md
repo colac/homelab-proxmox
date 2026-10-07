@@ -2,7 +2,7 @@
 
 The single place core's status lives, plus the homelab-wide items no other
 repo owns. When something lands, check it off here — `README.md` and
-`CLAUDE.md` point at this file rather than duplicating status inline. Each of
+`AGENTS.md` point at this file rather than duplicating status inline. Each of
 the other repos has its own `TODO.md`: monitoring for the Elastic Stack,
 workloads for Nextcloud and k3s.
 
@@ -17,11 +17,12 @@ workloads for Nextcloud and k3s.
       `.mise/sops-exec` decrypts per command, one profile per consumer
 - [x] Secrets split per repo (and per app in workloads); the shared
       `reverse_proxy_acme_email` key renamed `acme_email`
-- [ ] **Release core as `v2.0.0`** (merge with a `BREAKING CHANGE:` footer) —
-      the tag both consumers pin; `terraform init` and `mise run setup` there
-      fail until it exists
-- [ ] **Create the GitHub repos** `colac/homelab-proxmox-monitoring` and
-      `colac/homelab-proxmox-workloads`, push, and enable the release workflow
+- [x] **Released core as `v2.0.0`**; both consumers pin it
+- [x] **GitHub repos created** — `colac/homelab-proxmox-monitoring` and
+      `colac/homelab-proxmox-workloads`, both releasing
+- [x] **Docs centralised in `docs/`**: `CREDENTIALS.md` (every credential:
+      issue, store, rotate), `DEVELOPMENT.md` (tools, conventions, releases);
+      `AGENTS.md` per repo, imported by a one-line `CLAUDE.md`
 - [ ] **Revisit the committed `.claude/settings.json` in all three repos**:
       swap the `make`/`.venv` entries for the mise tasks, deny `sops -d` and
       `sops-exec` outright, keep `apply`/`play`/`packer build` on ask
@@ -39,21 +40,21 @@ workloads for Nextcloud and k3s.
       template; a second disk attached by `base-vm`'s `data_disk_size` and
       turned into `docker-vg` by the `docker_data` role, mounted at
       `/var/lib/docker`. k3s gets 12G, monitoring 100G. Nextcloud left alone
-- [ ] **Actually build and cut over to 26.04.** The 26.04 tree is validated by
-      `packer validate` only — it has never been run against the ISO. The
-      autoinstall's GRUB keystrokes, the reworked LVM storage config, and
-      26.04's switch to `sudo-rs` and Rust `coreutils` are what a live build
-      would test. Confirm with `lsblk` that `ubuntu-vg` actually exists —
-      the 24.04 template silently produced none. Cutting over is then a
-      `template_name` change in each consumer project, one at a time, and a
-      re-clone. Working notes: [RUNBOOK-2604.md](RUNBOOK-2604.md)
+- [x] **Built the 26.04 template** (template ID 9006 here, via a local
+      `variables.auto.pkrvars.hcl`) and moved monitoring onto it. Debugging
+      notes from those builds are in `packer/README.md`
+- [ ] **Move Nextcloud to 26.04** — tracked in the workloads repo's TODO; it
+      needs the AIO backup/restore path first. Then the 24.04 template can go
 
 ## Module (Terraform)
 
-- [ ] **`sockets` deprecation in `modules/base-vm`.** `terraform validate`
-      warns that `sockets = 1` should be `cpu { sockets = }`. Every consumer
-      picks it up on its next pin bump, and it changes the live Nextcloud VM's
-      plan — release it on its own and read each plan, not as a drive-by
+- [x] **`startup_shutdown` drift**: every plan proposed removing the block
+      Proxmox reports as `-1`. `base-vm` now declares it (`fix:` → v2.0.1)
+- [ ] **Roll out v2.0.1**: bump `?ref=` and `requirements.yml` to `v2.0.1` in
+      monitoring, then workloads; each plan should then say "No changes"
+- [ ] **`cores`/`sockets` deprecation in `modules/base-vm`.** `terraform
+      validate` warns they should move into `cpu { }`. It changes how the live
+      VMs' CPU is described — release it on its own and read each plan
 
 ## DNS (homelab-wide)
 

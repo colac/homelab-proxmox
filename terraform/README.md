@@ -77,11 +77,9 @@ workspace: [Terraform Cloud](https://app.terraform.io/app/) → Workspace →
 Settings → Execution Mode → **Local**. Forgetting shows up as a run that cannot
 reach the Proxmox API.
 
-Credentials reach Terraform only inside `mise run tf:*` tasks, through each
-repo's `.mise/sops-exec terraform` profile: `TF_VAR_pm_api_url`,
-`TF_VAR_pm_api_token_id`, `TF_VAR_pm_api_token_secret`,
-`TF_VAR_pm_tls_insecure`, and `TF_TOKEN_app_terraform_io` when `tf_cloud_token`
-is set. A bare `terraform plan` gets none of them, by design.
+Credentials reach Terraform only inside the `mise run tf…` tasks, through
+each repo's `.mise/sops-exec terraform` profile — a bare `terraform plan` gets
+none of them, by design. See [Credentials](#credentials).
 
 ### Gotchas
 
@@ -96,37 +94,16 @@ is set. A bare `terraform plan` gets none of them, by design.
   PiHole. Keep PiHole as your DNS while running Terraform.
 - **No IP is assigned by Terraform.** VMs take DHCP; give anything long-lived a
   DHCP reservation so its address doesn't move under Ansible's inventory.
-- **`sockets` is deprecated** in the provider (`cpu { sockets = }`); changing
-  it touches every consumer's plan, so it is tracked in [../TODO.md](../TODO.md)
-  rather than done as a drive-by.
+- **`cores` and `sockets` are deprecated** in the provider (`cpu { … }`);
+  changing them touches every consumer's plan, so it is tracked in
+  [../TODO.md](../TODO.md) rather than done as a drive-by.
+- **`startup_shutdown` is declared with `-1` values** on purpose: Proxmox
+  reports "unset" that way, and leaving the block out makes every plan propose
+  a change that never sticks.
 
-## Create the Terraform user in Proxmox
+## Credentials
 
-A platform task, done once, so it is documented here even though the token is
-used by the other repos. Run in the Proxmox node console:
-
-```bash
-# create role and set privileges
-pveum role add TerraformRole -privs "Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Allocate Pool.Audit Sys.Audit Sys.Console Sys.Modify VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Migrate VM.PowerMgmt VM.GuestAgent.Audit SDN.Use"
-
-# create user (choose your own password)
-pveum user add terraform@pve --password 'CHANGE_ME'
-
-# set permissions
-pveum aclmod / -user terraform@pve -role TerraformRole
-
-# create API token — prints the secret exactly once
-pveum user token add terraform@pve terraform-automation --privsep 0
-```
-
-The token ID and secret go in the `secrets.yaml` of **each repo that runs
-Terraform** (monitoring, workloads) as `proxmox_terraform_token_id` /
-`proxmox_terraform_token_secret` — not in this repo's, which only builds
-templates. It is a *different* token from Packer's: Packer needs
-template-build rights, Terraform needs clone/configure rights, and neither
-should carry the other's.
-
-A separate token per repo (`terraform-monitoring`, `terraform-workloads`) is
-the next step in least privilege: revoking one then cannot break the other.
-`pveum user token add terraform@pve terraform-monitoring --privsep 0` creates
-it under the same role.
+Projects authenticate as `terraform@pve` — clone/configure rights, a different
+token from Packer's. Issuing it (and the optional Terraform Cloud token) is in
+[docs/CREDENTIALS.md](../docs/CREDENTIALS.md#terraform-proxmox-token); it is
+stored in the monitoring and workloads repos, never here.

@@ -22,7 +22,7 @@ The split follows blast radius and ownership, not technology:
   Nextcloud users. Inside each repo, Terraform and Ansible get different
   subsets again (see [Secrets](#secrets-least-privilege-per-command)).
 - **Each layer is a small, self-contained context.** A person — or an AI
-  agent — working on Nextcloud loads one `CLAUDE.md`, one runbook and one
+  agent — working on Nextcloud loads one `AGENTS.md`, one runbook and one
   secrets file, not the history of the Elastic port.
 - **Observability is separate from what it observes.** The thing you use to
   see a failure should not share a release, or a failure mode, with it.
@@ -150,7 +150,7 @@ loudly.
 flowchart LR
   a["Change in core<br/>(role, module, template)"] --> b["mise run lint<br/>PR, Conventional Commit"]
   b --> c["merge → semantic-release<br/>tags vX.Y.Z"]
-  c --> d["bump ONE consumer's pin<br/>mise run setup"]
+  c --> d["bump ONE consumer's pin<br/>mise run deps"]
   d --> e["--check --diff / plan<br/>read it"]
   e --> f["apply / play"]
   f --> g{"healthy?"}
@@ -187,33 +187,16 @@ flowchart LR
   se --> t1 & t2 & t3
 ```
 
-| Repo | File | Profile | Exports |
-|---|---|---|---|
-| core | `secrets.yaml` | `packer` | `PKR_VAR_proxmox_api_*`, `PKR_VAR_password_hash`, node/TLS flag, `ssh_authorized_keys` |
-| monitoring | `secrets.yaml` | `terraform` | `TF_VAR_pm_api_*`, `TF_VAR_pm_tls_insecure`, `TF_TOKEN_app_terraform_io` |
-| monitoring | `secrets.yaml` | `ansible` | Elastic passwords and key, Kibana's Cloudflare token + ACME email, `NEXTCLOUD_DOMAIN`, exporter tokens |
-| workloads | `secrets.yaml` | `terraform` | `TF_VAR_pm_api_*`, `TF_VAR_pm_tls_insecure`, `TF_TOKEN_app_terraform_io` |
-| workloads | `nextcloud/secrets.yaml` | `nextcloud` | Domain, Caddy's Cloudflare token + ACME email, TrueNAS SMB, Nextcloud users, Tailscale key |
+Which file and profile each repo uses, what each profile exports, and how
+every credential is issued and rotated: [CREDENTIALS.md](CREDENTIALS.md).
+Next steps toward least privilege — one Terraform token per repo, a
+read-only identity for AI agents — are in each repo's TODO.
 
-`mise run secrets:check` in any repo verifies the keys are present without
-printing a value.
+## Tooling
 
-Two Proxmox tokens exist today: `packer@pve` (template-build rights, core
-only) and `terraform@pve` (clone/configure rights, monitoring and workloads).
-Next steps, tracked in each repo's TODO: one Terraform token per repo, one
-Cloudflare token per certificate, and a read-only identity (separate age key,
-`PVEAuditor` token) an AI agent can use for plans and health checks while
-`apply`/`play` stay with the human.
-
-## Tooling, the same in every repo
-
-| | |
-|---|---|
-| Tools | `mise.toml` pins Terraform, Packer (core), terraform-docs, tflint, trivy, shellcheck, sops, age, Python 3.12, Node; `mise install` |
-| Setup | `mise run setup`: Python venv (`ansible-core`, `ansible-lint`, `pre-commit`), Node tools, collections, git hooks, tflint plugins |
-| Checks | `mise run lint` (pre-commit on every file + ansible-lint at the production profile), `mise run tf:validate` |
-| Releases | Conventional Commits → semantic-release → `vX.Y.Z` tag + `CHANGELOG.md`, per repo |
-| Agent context | One `CLAUDE.md` per repo (plus one per app in workloads), each listing only that scope's deliberate decisions |
+The same in every repo — mise for tools and entry points, Conventional
+Commits and semantic-release for versions, one `AGENTS.md` per repo (plus one
+per app in workloads) for AI agents. See [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## DNS today, and where it is heading
 

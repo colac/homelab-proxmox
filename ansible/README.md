@@ -39,15 +39,17 @@ collections:
 
 `mise run setup` in the consumer installs it. To try an unreleased change
 from a sibling checkout before tagging, `mise run deps:dev` installs this
-directory over the pinned one; `mise run setup` puts the pin back.
+directory over the pinned one; `mise run deps` puts the pin back.
 
 ## Releasing a change
 
 1. Change the role here, `mise run lint`.
 2. Merge with a Conventional Commit — semantic-release tags it (`fix:` →
    patch, `feat:` → minor, a `BREAKING CHANGE:` footer → major).
-3. Bump `version:` in each consumer's `requirements.yml`, `mise run setup`,
-   and run its `00-bootstrap.yml` with `--check` first.
+3. In each consumer, bump the tag in `requirements.yml` **and** the `?ref=` in
+   its Terraform (they move together), `mise run deps`, and run its
+   `00-bootstrap.yml` with `--check --diff` first. Full steps:
+   [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#releasing-a-core-change).
 
 Bump `version:` in [`galaxy.yml`](galaxy.yml) on a breaking change too. It
 does not select anything (the tag does), but it is what
