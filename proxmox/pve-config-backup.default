@@ -1,0 +1,18 @@
+# Settings for /usr/local/sbin/pve-config-backup (homelab-proxmox/proxmox).
+# Seeded once by configure.sh; edit here on the node.
+
+# Where archives go. The node's own disk is no backup for the node: point this
+# at the NAS (e.g. an NFS storage added in Proxmox, mounted under /mnt/pve/),
+# and set BACKUP_MOUNT to that mount so a failed mount is an error, not a
+# silent write to the local disk.
+BACKUP_DIR=/root/pve-config-backups
+#BACKUP_DIR=/mnt/pve/truenas/pve-config
+#BACKUP_MOUNT=/mnt/pve/truenas
+
+# age PUBLIC key(s), space-separated — the same recipient .sops.yaml commits.
+# Not a secret: a public key can only encrypt. The private half
+# (AGE-SECRET-KEY-1…, ~/.config/sops/age/keys.txt) never leaves the workstation.
+AGE_RECIPIENTS=age1phcdsaskydmwz3d2nug3jdgkh6czetfszktjcu4ur7y5klvtegaqmehlyy
+
+# Archives older than this are deleted.
+KEEP_DAYS=30

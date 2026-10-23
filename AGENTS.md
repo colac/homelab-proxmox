@@ -8,8 +8,9 @@ rules below are the ones that must hold in every session.
 
 The core layer of a three-repo Proxmox homelab: Packer templates, the
 `base-vm` Terraform module, the `colac.homelab` Ansible collection
-(`common`, `docker_data`) — and one platform service, **DNS** (`dns/`: Pi-hole
-in an LXC container). Apart from `dns/`, nothing here touches a running
+(`common`, `docker_data`) — one platform service, **DNS** (`dns/`: Pi-hole
+in an LXC container), and the **Proxmox host** itself (`proxmox/`: API
+identities, backups). Apart from those two, nothing here touches a running
 machine. Siblings in `~/git-repos/`:
 
 - `homelab-proxmox-monitoring` — the Elastic Stack VM, agents on every host
@@ -27,6 +28,8 @@ what consumers must do. Elastic and Nextcloud work belongs in those repos.
   rotate, add
 - [dns/README.md](dns/README.md) and [dns/AGENTS.md](dns/AGENTS.md) — the LAN
   resolver; read before touching `dns/`
+- [proxmox/README.md](proxmox/README.md) — the node's roles, users, tokens
+  and config backup; every identity there mirrors CREDENTIALS.md
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — mise tasks, conventions,
   releasing and bumping pins
 - [packer/README.md](packer/README.md), [terraform/README.md](terraform/README.md),
