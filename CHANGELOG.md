@@ -1,3 +1,12 @@
+## [2.2.2](https://github.com/colac/homelab-proxmox/compare/v2.2.1...v2.2.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ansible:** don't count apt's phased or kept-back packages as pending ([a1b0311](https://github.com/colac/homelab-proxmox/commit/a1b0311a49e51febaddecc5c186df5430bc94c0e))
+* **ansible:** keep the update plan and guest list when --limit is used ([8158bb9](https://github.com/colac/homelab-proxmox/commit/8158bb90cf1bc498784d2f12c89ebaaae87c1ae6))
+* **packer:** write unattended-upgrades' origins as real placeholders ([f8c2bae](https://github.com/colac/homelab-proxmox/commit/f8c2baee0c411098ad0d4b43a7b05e02fe379be2))
+
 ## [2.2.1](https://github.com/colac/homelab-proxmox/compare/v2.2.0...v2.2.1) (2026-10-23)
 
 

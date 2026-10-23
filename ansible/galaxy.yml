@@ -14,7 +14,7 @@
 # It reads 2.0.0 until the first release after that automation landed.
 namespace: colac
 name: homelab
-version: 2.2.1
+version: 2.2.2
 readme: README.md
 authors:
   - colac
