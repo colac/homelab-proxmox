@@ -1,3 +1,10 @@
+## [2.2.1](https://github.com/colac/homelab-proxmox/compare/v2.2.0...v2.2.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ansible:** never sudo on the controller in the update playbook ([fddaab7](https://github.com/colac/homelab-proxmox/commit/fddaab725a60fdc040d58bf2b2080568f3fd7589))
+
 # [2.2.0](https://github.com/colac/homelab-proxmox/compare/v2.1.0...v2.2.0) (2026-10-23)
 
 
