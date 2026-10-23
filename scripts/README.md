@@ -16,13 +16,13 @@ sudo ./scripts/check-disk-health.sh --short-test /dev/sdb
 ```
 
 Requires `smartmontools` (`sudo apt-get install -y smartmontools`) and root.
-Exit code is non-zero if any drive fails.
+Exit code is non-zero if any drive fails or could not be read.
 
 ### What it checks
 
 | Check | Fails on |
 |---|---|
-| SMART overall health | not `PASSED` |
+| SMART overall health | `FAILED!` (unreadable is **UNKNOWN**, not a failure) |
 | Reallocated sectors (5) | any non-zero |
 | Pending sectors (197) | any non-zero |
 | Offline uncorrectable (198) | any non-zero |
@@ -33,6 +33,10 @@ Exit code is non-zero if any drive fails.
 Warnings (not failures) cover SMR drives, non-zero UDMA CRC errors, a
 power-on-hours count above 100 (suggesting used stock sold as new), a
 temperature above 45 °C, and the absence of any self-test on record.
+
+**UNKNOWN** means no SMART data was read, so the counters shown are not real.
+The usual cause is SMART switched off inside the drive (some USB enclosures
+ship that way): `sudo smartctl -s on /dev/sdX`, then run the script again.
 
 ### CMR vs SMR
 

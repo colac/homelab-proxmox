@@ -100,7 +100,7 @@ for dev in "${DEVICES[@]}"; do
 
     if [ ! -b "$dev" ]; then
         echo "❌ Not a block device."
-        SUMMARY+=("$dev|-|FAIL|not a block device")
+        SUMMARY+=("$dev|-|-|FAIL|not a block device")
         EXIT_CODE=1
         continue
     fi
@@ -118,10 +118,22 @@ for dev in "${DEVICES[@]}"; do
 
     INFO=$(smartctl -i "${SMART_OPTS[@]}" "$dev" 2>&1 || true)
 
+    # SMART can be switched off inside the drive (some USB enclosures ship that
+    # way). Every read then answers "SMART Disabled", and the checks below would
+    # report a healthy disk as FAILED with all counters at 0 — so stop and say so.
+    if grep -q "SMART support is: *Disabled" <<<"$INFO"; then
+        echo "⚠️  SMART is switched off on this drive, so there is nothing to read."
+        echo "   Enable it (a drive setting; no data is touched), then re-run:"
+        echo "     sudo smartctl -s on ${SMART_OPTS[*]} $dev"
+        SUMMARY+=("$dev|$(info_field "$INFO" "Device Model")|-|UNKNOWN|SMART disabled — smartctl -s on")
+        EXIT_CODE=1
+        continue
+    fi
+
     if ! grep -q "SMART support is: *Enabled" <<<"$INFO"; then
         if grep -qi "Unavailable\|Unknown USB bridge" <<<"$INFO"; then
             echo "❌ SMART is not readable through this USB bridge."
-            SUMMARY+=("$dev|-|FAIL|no SMART pass-through")
+            SUMMARY+=("$dev|-|-|FAIL|no SMART pass-through")
             EXIT_CODE=1
             continue
         fi
@@ -166,11 +178,16 @@ for dev in "${DEVICES[@]}"; do
 
     # ── SMART health and attributes ───────────────────────────────────────────
 
+    # Three outcomes, not two: the drive vouches for itself (PASSED, or OK on
+    # SCSI), it reports FAILED!, or the health could not be read at all — which
+    # is not evidence of a bad disk and must not be reported as one.
     HEALTH_RAW=$(smartctl -H "${SMART_OPTS[@]}" "$dev" 2>&1 || true)
     if grep -q "PASSED\|OK" <<<"$HEALTH_RAW"; then
         HEALTH="PASSED"
-    else
+    elif grep -q "FAILED" <<<"$HEALTH_RAW"; then
         HEALTH="FAILED"
+    else
+        HEALTH="UNKNOWN"
     fi
 
     ATTRS=$(smartctl -A "${SMART_OPTS[@]}" "$dev" 2>&1 || true)
@@ -220,7 +237,10 @@ for dev in "${DEVICES[@]}"; do
     VERDICT="PASS"
     NOTES=()
 
-    [ "$HEALTH" = "PASSED" ]  || { VERDICT="FAIL"; NOTES+=("SMART health FAILED"); }
+    case "$HEALTH" in
+        FAILED)  VERDICT="FAIL";    NOTES+=("SMART health FAILED") ;;
+        UNKNOWN) VERDICT="UNKNOWN"; NOTES+=("SMART health unreadable — the counters above are not real readings") ;;
+    esac
     [ "$REALLOC" -eq 0 ]      || { VERDICT="FAIL"; NOTES+=("$REALLOC reallocated sectors"); }
     [ "$PENDING" -eq 0 ]      || { VERDICT="FAIL"; NOTES+=("$PENDING pending sectors"); }
     [ "$UNCORR" -eq 0 ]       || { VERDICT="FAIL"; NOTES+=("$UNCORR uncorrectable sectors"); }
@@ -236,7 +256,7 @@ for dev in "${DEVICES[@]}"; do
         NOTES+=("self-test reported failure")
     fi
 
-    if [ "$VERDICT" != "FAIL" ]; then
+    if [ "$VERDICT" = "PASS" ] || [ "$VERDICT" = "WARN" ]; then
         [ "$REC_TECH" != "SMR" ] || { VERDICT="WARN"; NOTES+=("SMR — avoid for RAID"); }
         [ "$CRC" -eq 0 ]         || { VERDICT="WARN"; NOTES+=("$CRC CRC errors (cable/bridge)"); }
         [ "$HOURS" -le 100 ]     || { VERDICT="WARN"; NOTES+=("$HOURS power-on hours — used stock?"); }
@@ -254,6 +274,7 @@ for dev in "${DEVICES[@]}"; do
         PASS) echo "  ${C_GRN}✅ PASS${C_RST} — $NOTE_STR" ;;
         WARN) echo "  ${C_YLW}⚠️  WARN${C_RST} — $NOTE_STR" ;;
         FAIL) echo "  ${C_RED}❌ FAIL${C_RST} — $NOTE_STR"; EXIT_CODE=1 ;;
+        UNKNOWN) echo "  ${C_YLW}❔ UNKNOWN${C_RST} — $NOTE_STR"; EXIT_CODE=1 ;;
     esac
 
     SUMMARY+=("$dev|${MODEL:-unknown}|$REC_TECH|$VERDICT|$NOTE_STR")
@@ -265,11 +286,11 @@ echo
 echo "═══════════════════════════════════════════════════════════════════"
 echo " SUMMARY"
 echo "═══════════════════════════════════════════════════════════════════"
-printf '%-10s %-24s %-5s %-6s %s\n' "DEVICE" "MODEL" "REC" "RESULT" "NOTES"
-printf '%-10s %-24s %-5s %-6s %s\n' "──────" "─────" "───" "──────" "─────"
+printf '%-10s %-24s %-7s %-7s %s\n' "DEVICE" "MODEL" "REC" "RESULT" "NOTES"
+printf '%-10s %-24s %-7s %-7s %s\n' "──────" "─────" "───" "──────" "─────"
 for row in "${SUMMARY[@]}"; do
     IFS='|' read -r s_dev s_model s_rec s_verdict s_notes <<<"$row"
-    printf '%-10s %-24s %-5s %-6s %s\n' \
+    printf '%-10s %-24s %-7s %-7s %s\n' \
         "$s_dev" "${s_model:0:24}" "$s_rec" "$s_verdict" "$s_notes"
 done
 
