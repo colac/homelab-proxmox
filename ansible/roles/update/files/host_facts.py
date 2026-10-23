@@ -60,14 +60,36 @@ def apt(refresh):
         result["errors"] = [l.strip() for l in (out + err).splitlines() if l.startswith(("E:", "Err:"))]
         if rc != 0 and not result["errors"]:
             result["errors"].append("apt-get update exited %d" % rc)
+    held = held_back()
     _, out, _ = run(["apt", "list", "--upgradable"])
     for line in out.splitlines():
         # name/suite1,suite2 version arch [upgradable from: old]
         m = re.match(r"^(\S+?)/(\S+)\s+(\S+)\s+\S+\s+\[upgradable from: ([^\]]+)\]", line)
         if m:
             result["upgradable"].append({"name": m[1], "suites": m[2], "version": m[3], "from": m[4],
-                                         "security": "security" in m[2]})
+                                         "security": "security" in m[2], "held": held.get(m[1])})
     return result
+
+
+def held_back():
+    """Upgradable packages apt would not install now, with the reason.
+
+    `apt list --upgradable` includes Ubuntu's phased updates, which apt
+    defers until the rollout reaches this machine, and packages it keeps back
+    (unresolvable). apt full-upgrade installs neither, so the report must not
+    count them as pending. A simulation lists both.
+    """
+    _, out, _ = run(["apt-get", "-s", "-o", "Debug::NoLocking=1", "dist-upgrade"], timeout=300)
+    held, reason = {}, None
+    for line in out.splitlines():
+        if line.startswith("The following") and line.rstrip().endswith(":"):
+            reason = ("phased" if "phasing" in line else "kept back" if "kept back" in line else None)
+        elif reason and line.startswith(" "):
+            for name in line.split():
+                held[name.split(":")[0]] = reason
+        else:
+            reason = None
+    return held
 
 
 def reboot():
