@@ -1,0 +1,22 @@
+---
+# Read one update target: packages, reboot/restart needs, containers,
+# component versions, health. Read-only apart from refreshing apt's package
+# lists. An unreachable host is recorded, not fatal: the report still appears.
+- name: Read packages, containers, versions and health
+  ansible.builtin.script:
+    cmd: "host_facts.py {{ _update_config | to_json | b64encode }}"
+    executable: python3
+  vars:
+    _update_config:
+      refresh: "{{ update_gather_refresh | default(true) }}"
+      components: "{{ update_components | selectattr('hosts', 'contains', inventory_hostname) | list }}"
+      checks: "{{ update_checks }}"
+      proxmox_guests: "{{ inventory_hostname in groups['proxmox_hosts'] | default([]) }}"
+  register: _update_gather
+  changed_when: false
+  check_mode: false
+  ignore_unreachable: true
+
+- name: Keep the facts for the plan (none when unreachable)
+  ansible.builtin.set_fact:
+    update_facts: "{{ none if (_update_gather.unreachable | default(false)) else (_update_gather.stdout | from_json) }}"

@@ -1,0 +1,12 @@
+---
+# The Proxmox node, as root. apply never reboots it, and changes its packages
+# only with -e update_allow_pve=true.
+ansible_user: root
+update_kind: pve
+update_checks:
+  - systemd: [pve-cluster, pvedaemon, pveproxy, pvestatd]
+update_components:
+  - name: Proxmox VE
+    hosts: [pve]
+    version: {command: [pveversion], pattern: 'pve-manager/([\d.]+)'}
+    apply: "mise run update:apply -e update_allow_pve=true (apt)"

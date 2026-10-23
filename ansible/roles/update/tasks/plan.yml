@@ -1,0 +1,42 @@
+---
+# On the controller: compare every target's facts with upstream releases,
+# write the JSON report, and keep the plan (per host: what apply may do).
+- name: Collect every target's facts and Proxmox identity
+  ansible.builtin.set_fact:
+    _update_hosts: >-
+      {{ _update_hosts | default({}) | combine({item: {
+           'kind': hostvars[item].update_kind,
+           'facts': hostvars[item].update_facts | default(none),
+           'proxmox_name': hostvars[item].update_proxmox_name | default(none),
+           'components': hostvars[item].update_components | selectattr('hosts', 'contains', item) | list}}) }}
+  loop: "{{ groups['update_targets'] }}"
+
+- name: Compare with upstream and write the report
+  ansible.builtin.command:
+    cmd: "python3 {{ role_path }}/files/plan.py"
+    stdin: "{{ _update_input | to_json }}"
+  vars:
+    _update_node: "{{ (groups['proxmox_hosts'] | default([]))[:1] }}"
+    _update_input:
+      phase: "{{ update_phase }}"
+      # The directory ansible-playbook was started from (PWD), not the
+      # playbook's: for a collection playbook that is the collection itself.
+      report_dir: "{{ update_report_dir or (lookup('ansible.builtin.env', 'PWD') ~ '/reports') }}"
+      hosts: "{{ _update_hosts }}"
+      guests: >-
+        {{ ((hostvars[_update_node[0]].update_facts | default({}) or {}).proxmox_guests | default([]))
+           if _update_node else [] }}
+      check_untracked_guests: "{{ _update_node | intersect(groups['update_targets']) | length > 0 }}"
+      guests_elsewhere: "{{ update_guests_elsewhere }}"
+  register: _update_plan
+  changed_when: false
+  check_mode: false
+
+- name: Keep the plan
+  ansible.builtin.set_fact:
+    update_plan: "{{ _update_plan.stdout | from_json }}"
+    _update_hosts: {}
+
+- name: Show the report
+  ansible.builtin.debug:
+    msg: "{{ update_plan.summary }}"

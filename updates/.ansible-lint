@@ -1,0 +1,6 @@
+---
+profile: production
+offline: true
+# The collection is linted in ../ansible; this symlink would lint it twice.
+exclude_paths:
+  - collections/

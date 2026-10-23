@@ -1,0 +1,8 @@
+---
+# Pi-hole's own updater (core, web, FTL) — the Pi-hole component's apply_role
+# in core's update procedure (updates/inventory/group_vars/pihole.yml). The
+# same command as main.yml's opt-in "Upgrade Pi-hole" task.
+- name: Update Pi-hole (core, web, FTL)
+  ansible.builtin.command: pihole -up
+  register: _pihole_update
+  changed_when: "'up to date' not in _pihole_update.stdout"

@@ -1,0 +1,6 @@
+---
+# tasks file for update — driven by playbook colac.homelab.update through
+# tasks_from: gather, guests, plan, apply. There is no default entry point.
+- name: Use playbook colac.homelab.update
+  ansible.builtin.fail:
+    msg: "The update role is driven by the colac.homelab.update playbook (tasks_from: gather, guests, plan, apply)."

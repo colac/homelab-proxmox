@@ -57,11 +57,12 @@ description = "Every pre-commit hook on every file, then ansible-lint"
 run = ["pre-commit run --all-files", { task = "lint:ansible" }]
 
 [tasks."lint:ansible"]
-description = "ansible-lint (production profile) on the colac.homelab collection, dns/ansible and TrueNAS/ansible"
+description = "ansible-lint (production profile) on the colac.homelab collection, dns/ansible, TrueNAS/ansible and updates/"
 run = '''
 (cd ansible && ansible-lint)
 (cd dns/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml --syntax-check)
 (cd TrueNAS/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml playbooks/20-backup-usb.yml playbooks/90-selftest.yml --syntax-check)
+(cd updates && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook -i inventory/hosts.yml.example colac.homelab.update --syntax-check)
 '''
 
 [tasks."tf:validate"]
@@ -146,6 +147,30 @@ run = "ansible-playbook"
 description = "Show the TrueNAS inventory (no credentials)"
 dir = "{{config_root}}/TrueNAS/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
+run = "ansible-inventory --graph"
+
+# --------------------------------------------------------------------------
+# Updates — core's own machines: the Proxmox host and the Pi-hole container
+# (updates/, docs/UPDATES.md). Monitoring and workloads run the same procedure
+# for theirs. No secrets: SSH keys only. Extra args go to ansible-playbook:
+# -e update_reboot=true, -e update_allow_pve=true, --limit pihole-ct, …
+# --------------------------------------------------------------------------
+[tasks.update]
+description = "Report what the Proxmox host and Pi-hole need; changes nothing (writes updates/reports/)"
+dir = "{{config_root}}/updates"
+env = { ANSIBLE_CONFIG = "{{config_root}}/updates/ansible.cfg" }
+run = "ansible-playbook colac.homelab.update"
+
+[tasks."update:apply"]
+description = "Snapshot Pi-hole, then apt and pihole -up (-e update_reboot=true, -e update_allow_pve=true)"
+dir = "{{config_root}}/updates"
+env = { ANSIBLE_CONFIG = "{{config_root}}/updates/ansible.cfg" }
+run = "ansible-playbook colac.homelab.update -e update_apply=true"
+
+[tasks."update:inventory"]
+description = "Show the update inventory (no credentials)"
+dir = "{{config_root}}/updates"
+env = { ANSIBLE_CONFIG = "{{config_root}}/updates/ansible.cfg" }
 run = "ansible-inventory --graph"
 
 # --------------------------------------------------------------------------

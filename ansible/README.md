@@ -1,16 +1,18 @@
 # Ansible collection `colac.homelab` — shared host roles
 
-The roles every VM in the homelab runs, whichever layer owns it. This repo
-does not run them: it has no inventory and no playbooks. The
+The roles every VM in the homelab runs, whichever layer owns it. The
 [monitoring](https://github.com/colac/homelab-proxmox-monitoring) and
 [workloads](https://github.com/colac/homelab-proxmox-workloads) repos install
 the collection from git, pinned to a release tag of this repo, and call the
-roles by their fully qualified names in their own `00-bootstrap.yml`.
+roles by their fully qualified names in their own `00-bootstrap.yml`. The one
+playbook it ships, `colac.homelab.update`, is the update procedure each repo
+runs for its own machines — core included, from its checkout (`updates/`).
 
 | Role | Does | Mutates? |
 |---|---|---|
 | `colac.homelab.common` | Preflight asserts: the host has an address, runs a supported Ubuntu, has Docker and Compose | No |
 | `colac.homelab.docker_data` | Puts `/var/lib/docker` (and containerd's image store) on the Terraform-attached data disk, under LVM | Yes |
+| `colac.homelab.update` (+ playbook `colac.homelab.update`) | Reports pending OS and app updates, health and untracked containers/guests; with `update_apply`, snapshots the guest, upgrades it and waits until healthy | Report: no. Apply: yes |
 
 Why a collection rather than a copy in each repo: a fix to `docker_data` —
 like the containerd bind mount that stopped the monitoring VM's root filling
@@ -109,6 +111,29 @@ needs a manual `vgrename <vg-uuid> docker-vg` first.
 Why the disk is partitioned here and not in the Packer template: a full clone
 copies LVM metadata verbatim, so every VM would get byte-identical PV and VG
 UUIDs and moving a disk would need `vgimportclone`.
+
+## `update`
+
+The update procedure ([../docs/UPDATES.md](../docs/UPDATES.md)), driven by the
+playbook `colac.homelab.update`, which a consumer imports from its
+`playbooks/90-update.yml`. The role has no default entry point; the playbook
+calls `tasks_from` `gather` (each target), `guests` (the Proxmox node's guest
+list), `plan` (on the controller), and `apply` (serial, stopping on the first
+failure).
+
+- **`files/host_facts.py`** runs on each host (Python standard library only,
+  read-only apart from `apt-get update`): packages, reboot need, services on
+  replaced libraries, containers, component versions, health checks.
+- **`files/plan.py`** runs on the controller: compares with GitHub releases
+  (set `GITHUB_TOKEN` for a higher rate limit), writes `reports/*.json`, prints
+  the summary, and decides per host what `apply` may do.
+- **App-specific steps stay in their owner's role.** A component's
+  `apply_role` (`pihole` → `tasks_from: update`, `nextcloud_aio` →
+  `tasks_from: update`) is included by name, so this role knows no app.
+
+The inventory contract (groups `update_targets` and `proxmox_hosts`, and
+`update_kind`, `update_proxmox_name`, `update_checks`, `update_components`) is
+documented in `roles/update/defaults/main.yml`.
 
 ## Linting
 
