@@ -78,10 +78,12 @@ mise run packer:build 26.04                    # build a template (credentials, 
 |---|---|
 | `packer/ubuntu-24.04/`, `packer/ubuntu-26.04/` | Template builds (`proxmox-iso`) |
 | `terraform/modules/base-vm/` | The one VM module |
-| `ansible/` | The `colac.homelab` collection (`galaxy.yml` at its root) |
+| `ansible/` | The `colac.homelab` collection (`galaxy.yml` at its root): `common`, `docker_data`, and the update procedure (`update` role, playbook `colac.homelab.update`) |
 | `dns/` | Pi-hole in an LXC container: Terraform, Ansible, its own `secrets.yaml` |
-| `docs/` | Homelab-wide: architecture, credentials, development |
+| `proxmox/` | The Proxmox host: `configure.sh` (roles, users, tokens, media, metric server) and the encrypted config backup |
+| `updates/` | The update procedure for core's machines (Proxmox host, Pi-hole): `mise run update` |
+| `docs/` | Homelab-wide: architecture, credentials, development, updates |
 | `scripts/` | Standalone ops helpers (disk vetting); not pipeline |
-| `TrueNAS/` | NAS install and hardening notes — not automated |
+| `TrueNAS/` | NAS install notes, runbook (adopt, rebuild, restore), and `ansible/`: users, shares, snapshot and USB backup tasks through its API |
 | `.mise/sops-exec`, `mise.toml` | Per-command secrets and every entry point |
 | `secrets.yaml` (+ `.example`) | Template-build credentials, SOPS-encrypted, committed as ciphertext |

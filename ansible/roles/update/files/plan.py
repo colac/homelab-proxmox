@@ -100,10 +100,14 @@ def main():
         if facts is None:
             entry["problems"].append("unreachable")
             continue
-        upg = facts["apt"]["upgradable"]
+        # Only what apt full-upgrade would install now: phased and kept-back
+        # packages are listed by apt but not installed.
+        upg = [p for p in facts["apt"]["upgradable"] if not p.get("held")]
+        held = [p for p in facts["apt"]["upgradable"] if p.get("held")]
         entry.update({
             "os": facts["os"], "pending": len(upg), "security": sum(1 for p in upg if p["security"]),
             "packages": [p["name"] for p in upg], "apt_errors": facts["apt"]["errors"],
+            "held": {p["name"]: p["held"] for p in held},
             "reboot": facts["reboot"]["reasons"], "restart": facts["restart_units"],
             "health": facts["health"],
         })
@@ -152,6 +156,9 @@ def main():
             s.append("%-14s UNREACHABLE" % name)
             continue
         line = "%-14s %-28s %3d pending (%d security)" % (name, e["os"][:28], e["pending"], e["security"])
+        if e["held"]:
+            reasons = sorted(set(e["held"].values()))
+            line += ", %d held back by apt (%s)" % (len(e["held"]), ", ".join(reasons))
         if e["reboot"]:
             line += "; reboot: " + "; ".join(e["reboot"])
         if e["restart"]:

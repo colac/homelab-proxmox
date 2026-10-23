@@ -1,33 +1,37 @@
 ---
-# On the controller: compare every target's facts with upstream releases,
-# write the JSON report, and keep the plan (per host: what apply may do).
-- name: Collect every target's facts and Proxmox identity
-  ansible.builtin.set_fact:
-    _update_hosts: >-
-      {{ _update_hosts | default({}) | combine({item: {
-           'kind': hostvars[item].update_kind,
-           'facts': hostvars[item].update_facts | default(none),
-           'proxmox_name': hostvars[item].update_proxmox_name | default(none),
-           'components': hostvars[item].update_components | selectattr('hosts', 'contains', item) | list}}) }}
-  loop: "{{ groups['update_targets'] }}"
-
+# On the controller, once per run: compare every target's facts with upstream
+# releases, write the JSON report, and keep the plan on localhost, where
+# apply reads it (per host: what apply may do). Delegated from the targets'
+# play rather than a localhost play, so --limit can never leave it out.
 - name: Compare with upstream and write the report
   ansible.builtin.command:
     cmd: "python3 {{ role_path }}/files/plan.py"
     stdin: "{{ _update_input | to_json }}"
   vars:
-    _update_node: "{{ (groups['proxmox_hosts'] | default([]))[:1] }}"
+    _update_hosts: >-
+      {% set out = {} %}
+      {% for h in ansible_play_hosts %}
+      {%   set hv = hostvars[h] %}
+      {%   set _ = out.update({h: {
+             'kind': hv.update_kind,
+             'facts': hv.update_facts | default(none),
+             'proxmox_name': hv.update_proxmox_name | default(none),
+             'components': hv.update_components | selectattr('hosts', 'contains', h) | list}}) %}
+      {% endfor %}
+      {{ out | to_json }}
     _update_input:
       phase: "{{ update_phase }}"
       # The directory ansible-playbook was started from (PWD), not the
       # playbook's: for a collection playbook that is the collection itself.
       report_dir: "{{ update_report_dir or (lookup('ansible.builtin.env', 'PWD') ~ '/reports') }}"
-      hosts: "{{ _update_hosts }}"
-      guests: >-
-        {{ ((hostvars[_update_node[0]].update_facts | default({}) or {}).proxmox_guests | default([]))
-           if _update_node else [] }}
-      check_untracked_guests: "{{ _update_node | intersect(groups['update_targets']) | length > 0 }}"
+      hosts: "{{ _update_hosts | trim | from_json }}"
+      guests: "{{ hostvars['localhost'].update_guest_list | default([]) }}"
+      check_untracked_guests: >-
+        {{ (groups['proxmox_hosts'] | default([]))[:1] | intersect(groups['update_targets']) | length > 0 }}
       guests_elsewhere: "{{ update_guests_elsewhere }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
   register: _update_plan
   changed_when: false
   check_mode: false
@@ -35,8 +39,11 @@
 - name: Keep the plan
   ansible.builtin.set_fact:
     update_plan: "{{ _update_plan.stdout | from_json }}"
-    _update_hosts: {}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
 
 - name: Show the report
   ansible.builtin.debug:
-    msg: "{{ update_plan.summary }}"
+    msg: "{{ hostvars['localhost'].update_plan.summary }}"
+  run_once: true
