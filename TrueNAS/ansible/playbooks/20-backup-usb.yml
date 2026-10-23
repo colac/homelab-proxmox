@@ -1,0 +1,108 @@
+---
+# Run the backup to the USB disk, now. Plug the disk in and import the pool
+# first (Storage → Import Pool); export it again afterwards
+# (Storage → backup-usb → Export/Disconnect, keeping the data) before
+# unplugging it.
+#
+#   mise run truenas:play playbooks/20-backup-usb.yml
+#
+# The replication task is declared with auto: false — the disk is unplugged
+# most of the time, so a scheduled run would fail and alert every day.
+- name: Back up to the USB disk
+  hosts: truenas
+  gather_facts: false
+  vars:
+    backup_usb_pool: backup-usb
+    backup_usb_tasks: "{{ truenas_replication_tasks | selectattr('target_dataset', 'match', backup_usb_pool ~ '/')
+                          | rejectattr('state', 'defined') | map(attribute='name') | list }}"
+  tasks:
+    - name: Check that the backup pool is imported and healthy
+      # One string, JSON quoted for the shell: a list-shaped argv item would be
+      # turned into a Python list and reach midclt as invalid JSON.
+      ansible.builtin.command:
+        cmd: "midclt call pool.query {{ [['name', '=', backup_usb_pool]] | to_json | quote }}"
+      register: _backup_usb_pool
+      changed_when: false
+      check_mode: false
+
+    - name: Fail unless the pool is online
+      ansible.builtin.assert:
+        that: (_backup_usb_pool.stdout | from_json | length) == 1 and (_backup_usb_pool.stdout | from_json)[0].status == 'ONLINE'
+        fail_msg: >-
+          Pool {{ backup_usb_pool }} is not imported and ONLINE. Plug the disk in,
+          then Storage → Import Pool in the TrueNAS UI, and run this again.
+        quiet: true
+
+    - name: Look up the replication tasks that write to the pool
+      ansible.builtin.command:
+        cmd: "midclt call replication.query {{ [['name', 'in', backup_usb_tasks]] | to_json | quote }}"
+      register: _backup_usb_tasks
+      changed_when: false
+      check_mode: false
+
+    - name: Fail unless every declared task exists
+      ansible.builtin.assert:
+        that: _backup_usb_found | sort == backup_usb_tasks | sort and backup_usb_tasks | length > 0
+        fail_msg: >-
+          Declared but not on TrueNAS: {{ backup_usb_tasks | difference(_backup_usb_found) | join(', ') or 'none declared' }}.
+          Run playbooks/site.yml first.
+        quiet: true
+      vars:
+        _backup_usb_found: "{{ _backup_usb_tasks.stdout | from_json | map(attribute='name') | list }}"
+
+    # The task sends the periodic snapshot task's snapshots (daily, 01:00), so
+    # a backup is at most a day old. No snapshot is taken here on purpose: one
+    # off the task's schedule is not the task's, so it would never expire.
+    - name: Count the snapshots each task can send
+      ansible.builtin.command:
+        cmd: >-
+          midclt call pool.snapshot.query
+          {{ [['dataset', '=', item.1.dataset], ['snapshot_name', '^', item.1.naming_schema.split('%')[0]]] | to_json | quote }}
+          {{ {'count': true} | to_json | quote }}
+      loop: "{{ _backup_usb_tasks.stdout | from_json | subelements('periodic_snapshot_tasks') }}"
+      loop_control:
+        label: "{{ item.0.name }}: {{ item.1.dataset }}@{{ item.1.naming_schema }}"
+      register: _backup_usb_snapshots
+      changed_when: false
+      check_mode: false
+
+    - name: Fail unless there is a snapshot to send
+      ansible.builtin.assert:
+        that: _backup_usb_none | length == 0
+        fail_msg: >-
+          No snapshot to send yet on {{ _backup_usb_none | join(', ') }}. The periodic snapshot
+          task takes the first one at 01:00 after it was created; run this again after that.
+        quiet: true
+      vars:
+        _backup_usb_none: >-
+          {{ _backup_usb_snapshots.results | selectattr('stdout', 'equalto', '0')
+             | map(attribute='item.1.dataset') | list }}
+
+    # replication.run is a job; -j makes midclt wait for it and fail if it
+    # fails. The first run sends everything (slow on this SMR disk); later
+    # runs send only what changed since the last common snapshot.
+    - name: Run each replication task and wait for it
+      ansible.builtin.command:
+        argv: [midclt, call, -j, replication.run, "{{ item.id }}"]
+      loop: "{{ _backup_usb_tasks.stdout | from_json }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+
+    # The copy must land encrypted (the pool's key, inherited). A dataset
+    # showing "off" here means the disk would carry readable family data.
+    - name: Check that every backed-up dataset is encrypted
+      ansible.builtin.command:
+        cmd: "midclt call pool.dataset.query {{ [['pool', '=', backup_usb_pool]] | to_json | quote }}"
+      register: _backup_usb_encryption
+      changed_when: false
+      check_mode: false
+
+    - name: Fail on any unencrypted dataset on the backup pool
+      ansible.builtin.assert:
+        that: _backup_usb_unencrypted | length == 0
+        fail_msg: "Not encrypted on {{ backup_usb_pool }}: {{ _backup_usb_unencrypted | join(', ') }}"
+        success_msg: "Backup done; every dataset on {{ backup_usb_pool }} is encrypted. Export the pool before unplugging."
+      vars:
+        _backup_usb_unencrypted: >-
+          {{ _backup_usb_encryption.stdout | from_json | rejectattr('encrypted') | map(attribute='id') | list }}

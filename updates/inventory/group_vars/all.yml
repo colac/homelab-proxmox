@@ -1,0 +1,7 @@
+---
+# Guests on the node whose updates another repo's procedure covers. Any other
+# guest shows up in core's report as UNTRACKED — every VM and container must
+# belong to one repo's procedure.
+update_guests_elsewhere:
+  - monitoring   # homelab-proxmox-monitoring: mise run update
+  - nextcloud    # homelab-proxmox-workloads: mise run update nextcloud

@@ -1,0 +1,200 @@
+---
+# Proves the module against the real TrueNAS, using only throwaway objects:
+# a group, a user, a dataset and an SMB share, all named ansible-test. Each
+# step asserts what it must report: created, then unchanged on a repeat,
+# changed on an edit, removed, then unchanged again. Everything is removed at
+# the end, also when a step fails.
+#
+#   mise run truenas:play playbooks/90-selftest.yml
+#
+# Touches nothing that is declared in group_vars. UID/GID 39999 must be free.
+- name: Self-test the truenas_object module
+  hosts: truenas
+  gather_facts: false
+  vars:
+    selftest_name: ansible-test
+    selftest_id: 39999
+    selftest_dataset: hdd-home-1/ansible-test
+    selftest_group: {name: "{{ selftest_name }}", gid: "{{ selftest_id }}", smb: true}
+    selftest_user:
+      username: "{{ selftest_name }}"
+      uid: "{{ selftest_id }}"
+      full_name: Ansible self-test
+      group: "{{ selftest_name }}"
+      smb: true
+      random_password: true
+    selftest_share:
+      name: "{{ selftest_name }}"
+      path: "/mnt/{{ selftest_dataset }}"
+      purpose: DEFAULT_SHARE
+      comment: created by 90-selftest.yml
+      enabled: true
+  tasks:
+    - name: Run the lifecycle, always cleaning up
+      block:
+        - name: Create the group
+          truenas_object:
+            namespace: group
+            filters: [[name, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_group }}"
+            immutable: [gid]
+          register: _selftest_group
+
+        - name: Create the user in it
+          truenas_object:
+            namespace: user
+            filters: [[username, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_user }}"
+            create_only: [random_password]
+            immutable: [uid]
+            refs: [{key: group, namespace: group, match: name}]
+          register: _selftest_user
+
+        - name: Create the dataset
+          truenas_object:
+            namespace: pool.dataset
+            filters: [[id, "=", "{{ selftest_dataset }}"]]
+            data: {name: "{{ selftest_dataset }}", share_type: SMB, comments: ansible self-test}
+            create_only: [name, share_type]
+          register: _selftest_dataset
+
+        - name: Create the SMB share
+          truenas_object:
+            namespace: sharing.smb
+            filters: [[name, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_share }}"
+          register: _selftest_share
+
+        - name: All four were created
+          ansible.builtin.assert:
+            that: [_selftest_group.action == 'create', _selftest_user.action == 'create',
+                   _selftest_dataset.action == 'create', _selftest_share.action == 'create']
+            quiet: true
+
+        - name: Repeat the share — must report no change
+          truenas_object:
+            namespace: sharing.smb
+            filters: [[name, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_share }}"
+          register: _selftest_repeat
+
+        - name: Repeat the user — must report no change (names resolved to ids)
+          truenas_object:
+            namespace: user
+            filters: [[username, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_user }}"
+            create_only: [random_password]
+            immutable: [uid]
+            refs: [{key: group, namespace: group, match: name}]
+          register: _selftest_repeat_user
+
+        - name: Repeat the dataset — must report no change (ZFS properties compared)
+          truenas_object:
+            namespace: pool.dataset
+            filters: [[id, "=", "{{ selftest_dataset }}"]]
+            data: {name: "{{ selftest_dataset }}", share_type: SMB, comments: ansible self-test}
+            create_only: [name, share_type]
+          register: _selftest_repeat_dataset
+
+        - name: Repeats are idempotent
+          ansible.builtin.assert:
+            that: [not _selftest_repeat.changed, not _selftest_repeat_user.changed,
+                   not _selftest_repeat_dataset.changed]
+            fail_msg: >-
+              Reported a change on a repeat: {{ [_selftest_repeat, _selftest_repeat_user, _selftest_repeat_dataset]
+              | selectattr('changed') | map(attribute='diff') | list }}
+            quiet: true
+
+        - name: Edit the share's comment — must update it
+          truenas_object:
+            namespace: sharing.smb
+            filters: [[name, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_share | combine({'comment': 'updated by 90-selftest.yml'}) }}"
+          register: _selftest_edit
+
+        - name: Read the share back
+          # One string, JSON quoted for the shell: a list-shaped argv item would
+          # be turned into a Python list and reach midclt as invalid JSON.
+          ansible.builtin.command:
+            cmd: "midclt call sharing.smb.query {{ [['name', '=', selftest_name]] | to_json | quote }}"
+          register: _selftest_readback
+          changed_when: false
+
+        - name: The edit was an update, and TrueNAS has the new comment
+          ansible.builtin.assert:
+            that:
+              - _selftest_edit.action == 'update'
+              - (_selftest_readback.stdout | from_json)[0].comment == 'updated by 90-selftest.yml'
+            quiet: true
+
+        - name: A different UID must be refused, not applied
+          truenas_object:
+            namespace: user
+            filters: [[username, "=", "{{ selftest_name }}"]]
+            data: "{{ selftest_user | combine({'uid': selftest_id + 1}) }}"
+            immutable: [uid]
+            refs: [{key: group, namespace: group, match: name}]
+          register: _selftest_immutable
+          failed_when: _selftest_immutable is not failed or 'immutable' not in _selftest_immutable.msg
+
+        - name: Deleting a dataset without allow_delete must be refused
+          truenas_object:
+            namespace: pool.dataset
+            filters: [[id, "=", "{{ selftest_dataset }}"]]
+            state: absent
+          register: _selftest_guard
+          failed_when: _selftest_guard is not failed or 'refusing' not in _selftest_guard.msg
+
+      always:
+        - name: Remove the share
+          truenas_object:
+            namespace: sharing.smb
+            filters: [[name, "=", "{{ selftest_name }}"]]
+            state: absent
+          register: _selftest_rm_share
+
+        - name: Remove the dataset
+          truenas_object:
+            namespace: pool.dataset
+            filters: [[id, "=", "{{ selftest_dataset }}"]]
+            state: absent
+            allow_delete: true
+            delete_args: [{recursive: true}]
+          register: _selftest_rm_dataset
+
+        - name: Remove the user
+          truenas_object:
+            namespace: user
+            filters: [[username, "=", "{{ selftest_name }}"]]
+            state: absent
+          register: _selftest_rm_user
+
+        # Usually a no-op: user.delete also deletes the user's primary group.
+        - name: Remove the group
+          truenas_object:
+            namespace: group
+            filters: [[name, "=", "{{ selftest_name }}"]]
+            state: absent
+
+    - name: Removing again changes nothing
+      truenas_object:
+        namespace: sharing.smb
+        filters: [[name, "=", "{{ selftest_name }}"]]
+        state: absent
+      register: _selftest_rm_again
+
+    - name: Look for the group
+      ansible.builtin.command:
+        cmd: "midclt call group.query {{ [['name', '=', selftest_name]] | to_json | quote }}"
+      register: _selftest_group_left
+      changed_when: false
+
+    - name: Everything was removed, and removal is idempotent
+      ansible.builtin.assert:
+        that:
+          - _selftest_rm_share.action == 'delete'
+          - _selftest_rm_dataset.action == 'delete'
+          - _selftest_rm_user.action == 'delete'
+          - _selftest_group_left.stdout | from_json | length == 0
+          - not _selftest_rm_again.changed
+        success_msg: "Self-test passed: create, no-op repeat, update, guards and delete all behave."

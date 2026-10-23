@@ -1,0 +1,13 @@
+---
+# Users, groups, datasets, shares, snapshot and replication tasks — declared
+# in inventory/group_vars/truenas.yml, applied through TrueNAS's API.
+#
+#   mise run truenas:play playbooks/10-truenas.yml --check --diff
+#   mise run truenas:play playbooks/10-truenas.yml
+#
+# No facts: nothing here depends on the OS, and the role never touches it.
+- name: Declare the TrueNAS configuration
+  hosts: truenas
+  gather_facts: false
+  roles:
+    - truenas

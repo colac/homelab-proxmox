@@ -1,0 +1,14 @@
+---
+# On a Proxmox node that is not itself an update target here: only its guest
+# list, which identifies the targets for snapshots and container restarts.
+- name: List the node's VMs and containers
+  ansible.builtin.script:
+    cmd: "host_facts.py {{ {'guests_only': true} | to_json | b64encode }}"
+    executable: python3
+  register: _update_guests
+  changed_when: false
+  check_mode: false
+
+- name: Keep the guest list for the plan
+  ansible.builtin.set_fact:
+    update_facts: "{{ _update_guests.stdout | from_json }}"

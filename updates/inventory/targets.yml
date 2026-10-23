@@ -1,0 +1,10 @@
+---
+# What core's update procedure covers, in apply order: Pi-hole first, the
+# Proxmox host last. The hosts themselves come from hosts.yml and dns/'s
+# generated inventory.
+all:
+  children:
+    update_targets:
+      children:
+        pihole: {}
+        proxmox_hosts: {}

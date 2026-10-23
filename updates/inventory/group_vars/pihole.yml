@@ -1,0 +1,14 @@
+---
+# The Pi-hole container (dns/). Ansible is its root, as in dns/ansible.
+ansible_user: root
+update_kind: lxc
+update_proxmox_name: pihole
+update_checks:
+  - systemd: [pihole-FTL]
+  - port: 53
+update_components:
+  - name: Pi-hole
+    hosts: [pihole-ct]
+    version: {pihole: true}
+    apply: "mise run update:apply"
+    apply_role: {name: pihole, tasks_from: update}

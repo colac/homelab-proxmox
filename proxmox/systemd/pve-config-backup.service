@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up the Proxmox host configuration (age-encrypted)
+Documentation=https://github.com/colac/homelab-proxmox/tree/main/proxmox
+After=pve-cluster.service remote-fs.target
+Wants=remote-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-config-backup
+Nice=10
+IOSchedulingClass=idle

@@ -69,9 +69,11 @@ down here. Nothing else may.
 | Elastic Agent package | core → every VM | Pre-installed by Packer, disabled; version tracks monitoring's `stack_version` | Drift is tolerated: `elastic_agent` reinstalls the right version |
 | `base-vm` module | core → every Terraform project | `git::https://github.com/colac/homelab-proxmox.git//terraform/modules/base-vm?ref=vX.Y.Z` | Release a tag; bump one project's `ref`, `init -upgrade`, read the plan |
 | `colac.homelab` collection | core → every Ansible tree | `requirements.yml`: `…homelab-proxmox.git#/ansible/`, `version: vX.Y.Z` | Release a tag; bump one consumer; `00-bootstrap.yml --check --diff` |
-| Agent targets | workloads → monitoring | Host + address in monitoring's `ansible/inventory/hosts.yml` (group `agents`) | Add/remove the entry; run `20` and `50` with `--limit` |
+| Agent targets | core, workloads → monitoring | Host + address (+ connection user) in monitoring's `ansible/inventory/hosts.yml` (group `agents`): Nextcloud (workloads), `pihole-ct` (core) | Add/remove the entry; run `20` and `50` with `--limit` |
 | Nextcloud metrics | workloads → monitoring | `nextcloud_serverinfo_token`, minted on the VM, stored in monitoring's `secrets.yaml` | Re-mint, update monitoring's secret, re-run `45-exporters.yml` |
 | Private DNS names | each layer → core | A records (`nextcloud.<zone>`, `kibana.<zone>`, `pve.<zone>`) in `pihole_local_records`, `dns/ansible/inventory/group_vars/pihole.yml` | A PR to core, then `mise run dns:play playbooks/10-pihole.yml` |
+| Update procedure | core → monitoring, workloads | `colac.homelab.update` (playbook + `update` role). Each repo declares `update_targets`, `update_components`, `update_checks`, and the Proxmox node in `ansible/update/proxmox.yml` (snapshots, as root) — [UPDATES.md](UPDATES.md) | Release core, bump the pin, `mise run update` (report only) in each consumer |
+| Guest ownership | monitoring, workloads → core | Guest names in `update_guests_elsewhere` (`updates/inventory/group_vars/all.yml`); any other guest is UNTRACKED in core's report | Add or remove the name in the same change that adds or removes the VM |
 | Toolchain pins | core → all | Same versions in every `mise.toml` (Terraform 1.15.7, ansible-core 2.17.14, …) | Bump in core first, then the others |
 
 ## Runtime view

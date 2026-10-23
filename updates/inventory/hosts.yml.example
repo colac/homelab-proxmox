@@ -1,0 +1,10 @@
+---
+# The Proxmox node. Copy to hosts.yml (git-ignored: its address is machine
+# state). Pi-hole is not listed here: it comes from the inventory core's
+# dns/ Terraform writes (../dns/ansible/inventory/pihole.yml).
+all:
+  children:
+    proxmox_hosts:
+      hosts:
+        pve:
+          ansible_host: 192.168.1.169

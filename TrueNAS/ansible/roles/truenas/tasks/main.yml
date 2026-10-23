@@ -1,0 +1,99 @@
+---
+# tasks file for truenas
+#
+# Order matters: groups before the users that join them, datasets before the
+# shares and snapshot tasks on them, snapshot tasks before the replication
+# that sends their snapshots. Removal runs in the same order, so remove a
+# share in one run and its dataset in a later one. Removing a user also
+# removes its primary group (TrueNAS does that): mark only the user absent,
+# then delete both entries from the lists.
+#
+# Every task is truenas_object (library/): query, then create or update only
+# when a declared field differs. `--check --diff` shows exactly what would
+# change, and a run against a system that matches reports no changes.
+
+- name: Groups
+  truenas_object:
+    namespace: group
+    filters: [[name, "=", "{{ item.name }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    immutable: [gid]
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users
+  truenas_object:
+    namespace: user
+    filters: [[username, "=", "{{ item.username }}"]]
+    data: >-
+      {{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict
+         | combine({'random_password': true} if item.password_env is not defined else {}) }}
+    secret_data: "{{ {'password': lookup('env', item.password_env)} if item.password_env is defined else {} }}"
+    create_only: [random_password, home_create, group_create, password]
+    immutable: [uid]
+    refs:
+      - {key: group, namespace: group, match: name}
+      - {key: groups, namespace: group, match: name, many: true}
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Datasets
+  truenas_object:
+    namespace: pool.dataset
+    filters: [[id, "=", "{{ item.name }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    # Fixed at creation by ZFS, or by TrueNAS's create-time presets.
+    create_only: [name, type, share_type, casesensitivity, encryption, encryption_options,
+                  inherit_encryption, create_ancestors]
+    state: "{{ item.state | default('present') }}"
+    allow_delete: "{{ item.allow_delete | default(false) }}"
+    delete_args: [{recursive: true}]
+  loop: "{{ truenas_datasets }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: SMB shares
+  truenas_object:
+    namespace: sharing.smb
+    filters: [[name, "=", "{{ item.name }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_smb_shares }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: NFS shares
+  truenas_object:
+    namespace: sharing.nfs
+    filters: [[path, "=", "{{ item.path }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_nfs_shares }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Periodic snapshot tasks
+  truenas_object:
+    namespace: pool.snapshottask
+    filters: [[dataset, "=", "{{ item.dataset }}"], [naming_schema, "=", "{{ item.naming_schema }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_snapshot_tasks }}"
+  loop_control:
+    label: "{{ item.dataset }} ({{ item.naming_schema }})"
+
+- name: Replication tasks
+  truenas_object:
+    namespace: replication
+    filters: [[name, "=", "{{ item.name }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    refs:
+      - {key: periodic_snapshot_tasks, namespace: pool.snapshottask, many: true}
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_replication_tasks }}"
+  loop_control:
+    label: "{{ item.name }}"

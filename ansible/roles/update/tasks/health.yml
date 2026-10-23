@@ -1,0 +1,26 @@
+---
+# The host's update_checks, retried until they pass: containers restarting
+# after an update or a reboot take a while. A failure names the snapshot to
+# roll back to.
+- name: Check health
+  ansible.builtin.script:
+    cmd: "host_facts.py {{ {'health_only': true, 'checks': update_checks} | to_json | b64encode }}"
+    executable: python3
+  register: _update_health
+  until: _update_health.rc == 0 and (_update_health.stdout | from_json).health.ok
+  retries: "{{ update_health_retries }}"
+  delay: "{{ update_health_delay }}"
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Fail if the host is not healthy
+  ansible.builtin.assert:
+    that: _update_health.rc == 0 and (_update_health.stdout | from_json).health.ok
+    fail_msg: >-
+      {{ inventory_hostname }} is not healthy after the update:
+      {{ ((_update_health.stdout or '{}') | from_json).get('health', {}).get('failures', [_update_health.stderr | default('no output')]) | join('; ') }}.
+      {% if update_snapshot_name is defined %}Roll back with: {{ 'qm' if update_kind == 'vm' else 'pct' }}
+      rollback {{ update_host_plan.guest.vmid }} {{ update_snapshot_name }} (on the Proxmox host).{% endif %}
+      The run stopped here; later hosts were not touched.
+    success_msg: "{{ inventory_hostname }} is healthy."

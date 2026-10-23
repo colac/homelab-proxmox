@@ -69,9 +69,9 @@ workloads for Nextcloud and k3s.
 - [x] **Deployed the container** `pihole-ct` at `192.168.1.153` (2026-10-07,
       Terraform workspace `DNS`, health check green) and made it the router's
       DNS server; the hand-built Pi-hole at `.53` is stopped
-- [ ] **Tailscale split-DNS → `192.168.1.153`** — it still names `.53`, which
+- [x] **Tailscale split-DNS → `192.168.1.153`** — it still names `.53`, which
       is stopped, so off-LAN devices cannot resolve the zone until it changes
-- [ ] **Delete the hand-built Pi-hole container** after a quiet week (from
+- [x] **Delete the hand-built Pi-hole container** after a quiet week (from
       2026-10-14) — until then `pct start` on it is the rollback
 - [ ] **Router:** DHCP reservation for `.153` (`BC:24:11:00:01:53`), and check
       what it advertises as IPv6 DNS. Server 2: not a public resolver (it

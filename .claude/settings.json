@@ -95,6 +95,7 @@
       "Bash(mise run play*)",
       "Bash(mise run packer:*)",
       "Bash(mise run ping*)",
+      "Bash(mise run update*)",
       "Bash(mise run setup*)",
       "Bash(mise install*)",
       "Bash(mise trust*)",

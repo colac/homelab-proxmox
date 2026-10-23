@@ -83,8 +83,8 @@ variable "cores" {
 
 variable "memory_mb" {
   type        = number
-  description = "Memory in MB. Pi-hole uses well under 200 MB."
-  default     = 512
+  description = "Memory in MB (swap is the same). Pi-hole uses well under 200 MB; the rest is for the Elastic Agent the monitoring repo enrolls, which Elastic measures at ~220-280 MB RSS before integrations are added."
+  default     = 1024
 }
 
 variable "disk_size" {

@@ -1,0 +1,69 @@
+---
+# One update target, in this order: snapshot → apt → each component's
+# apply_role → reboot when needed and allowed → wait until healthy. Any
+# failure stops the whole run (the playbook is serial with any_errors_fatal),
+# leaving later hosts untouched.
+- name: Read this host's plan
+  ansible.builtin.set_fact:
+    update_host_plan: "{{ hostvars['localhost'].update_plan.hosts[inventory_hostname] }}"
+
+- name: Decide what applies here
+  ansible.builtin.set_fact:
+    update_todo_apt: "{{ 'apt' in update_host_plan.actions and (update_kind != 'pve' or update_allow_pve | bool) }}"
+    update_todo_reboot: "{{ update_reboot | bool and update_kind != 'pve' and 'reboot' in update_host_plan.actions }}"
+    update_todo_components: >-
+      {{ update_components | selectattr('hosts', 'contains', inventory_hostname) | selectattr('apply_role', 'defined')
+         | selectattr('name', 'in', update_host_plan.actions | select('match', '^component:')
+                                    | map('regex_replace', '^component:', '') | list + update_force)
+         | list }}
+
+- name: Nothing to apply on this host
+  ansible.builtin.meta: end_host
+  when: >-
+    not update_host_plan.reachable
+    or not (update_todo_apt | bool or update_todo_reboot | bool or update_todo_components | length > 0)
+
+- name: Refuse to change a host that is already unhealthy
+  ansible.builtin.assert:
+    that: update_host_plan.health.ok
+    fail_msg: >-
+      {{ inventory_hostname }} was unhealthy before anything changed:
+      {{ update_host_plan.health.failures | join('; ') }}. Fix that first, or leave
+      the host out with --limit '!{{ inventory_hostname }}'.
+    quiet: true
+
+- name: Refuse to change a guest that is not identified on Proxmox
+  ansible.builtin.assert:
+    that: update_host_plan.guest is not none
+    fail_msg: >-
+      {{ update_host_plan.problems | join('; ') }}. update_proxmox_name must match
+      exactly one guest: snapshots and restarts act on it.
+    quiet: true
+  when: update_kind in ['vm', 'lxc']
+
+- name: Snapshot the guest
+  ansible.builtin.include_tasks: snapshot.yml
+  when: update_kind in ['vm', 'lxc'] and update_snapshot | bool
+
+- name: Upgrade the OS packages (apt full-upgrade)
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+    autoremove: true
+    dpkg_options: force-confdef,force-confold
+  when: update_todo_apt | bool
+
+- name: Update each component this repo applies
+  ansible.builtin.include_role:
+    name: "{{ item.apply_role.name }}"
+    tasks_from: "{{ item.apply_role.tasks_from }}"
+  loop: "{{ update_todo_components }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Reboot if the update needs it
+  ansible.builtin.include_tasks: reboot.yml
+  when: update_todo_reboot | bool
+
+- name: Wait until the host is healthy again
+  ansible.builtin.include_tasks: health.yml

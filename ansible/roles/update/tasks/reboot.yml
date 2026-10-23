@@ -1,0 +1,22 @@
+---
+# A VM reboots itself; a container is restarted from the Proxmox node (inside
+# an LXC, the reboot module cannot tell the new boot from the old one).
+- name: Reboot the VM
+  ansible.builtin.reboot:
+    msg: "Rebooting after the homelab update procedure"
+    reboot_timeout: 900
+  when: update_kind == 'vm'
+
+- name: Restart the container from Proxmox
+  ansible.builtin.command:
+    argv: [pct, reboot, "{{ update_host_plan.guest.vmid }}"]
+  delegate_to: "{{ groups['proxmox_hosts'][0] }}"
+  become: false
+  changed_when: true
+  when: update_kind == 'lxc'
+
+- name: Wait for the container to come back
+  ansible.builtin.wait_for_connection:
+    delay: 10
+    timeout: 300
+  when: update_kind == 'lxc'

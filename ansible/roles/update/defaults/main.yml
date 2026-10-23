@@ -1,0 +1,55 @@
+---
+# defaults file for update — the update procedure every repo runs for its own
+# machines (playbook colac.homelab.update; core's docs/UPDATES.md).
+#
+# Inventory contract, per consuming repo:
+#   group update_targets   the hosts this repo updates
+#   group proxmox_hosts    the Proxmox node: snapshots and container restarts
+#                          run there as root; its guest list identifies each
+#                          target. Updated only where it is also a target (core).
+#   per target: update_kind (vm | lxc | pve), update_proxmox_name (the guest's
+#               name on Proxmox; vm and lxc only), update_checks,
+#               and update_components (usually group_vars).
+
+# false = report only; the consumer's update:apply task sets it.
+update_apply: false
+# Reboot guests that need it after applying. Never the Proxmox host.
+update_reboot: false
+# Let apply change the Proxmox host's own packages.
+update_allow_pve: false
+# Component names whose apply_role runs even when the report says current.
+update_force: []
+# Snapshot each guest on Proxmox before changing it; keep this many
+# preupdate_* snapshots per guest.
+update_snapshot: true
+update_snapshot_keep: 2
+# Health after apply: tries × delay seconds before the run fails.
+update_health_retries: 40
+update_health_delay: 15
+
+# Health checks of one host, each one of:
+#   {systemd: [unit, …]}  {port: N}  {containers: [name, …]}
+#   {command_json: [cmd…], expect: {key: value}, report: [key, …]}
+update_checks: []
+
+# What runs on the hosts besides OS packages. Per component:
+#   name        shown in the report
+#   hosts       inventory hosts it runs on
+#   containers  regex of the container names it owns; a running container no
+#               component claims is reported as UNTRACKED
+#   version     image_tag_of: <container> | exec: [<container>, cmd…] |
+#               command: [cmd…] | pihole: true; `pattern` extracts group 1
+#   details     extra values for the report, read the same way
+#   upstream    github: owner/repo; track: latest (default) | minor
+#   apply       the instruction the report prints when an update exists
+#   apply_role  {name, tasks_from}: apply runs it on the host when the report
+#               says an update exists (or the name is in update_force)
+update_components: []
+
+# Guest names on the node that other repos' procedures cover. Set where the
+# Proxmox host is a target (core): any other guest is reported as UNTRACKED.
+update_guests_elsewhere: []
+
+# Where the JSON reports go. Empty: reports/ in the directory ansible-playbook
+# is started from ($PWD; each repo's tree, git-ignored there).
+update_report_dir: ""

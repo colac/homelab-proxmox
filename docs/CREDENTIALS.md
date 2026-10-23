@@ -9,6 +9,9 @@ repeating commands.
 - **Rotating one?** Find it in [the inventory](#inventory) and follow its
   section.
 - **Adding a new secret to a repo?** [Adding a secret](#adding-a-secret).
+- **The Proxmox roles, users and tokens below** are also declared in
+  [`proxmox/configure.sh`](../proxmox/configure.sh), which creates whatever is
+  missing in one run. Change both together.
 
 ## How secrets are stored and delivered
 
@@ -59,6 +62,7 @@ losing it is recoverable by re-running the roles.
 | [Cloudflare DNS tokens](#cloudflare-dns-tokens) | Cloudflare | monitoring + workloads/nextcloud: `cloudflare_dns_api_token` | Kibana's certbot; Nextcloud's Caddy |
 | [Elastic passwords and key](#elastic-passwords-and-encryption-key) | you choose | monitoring: `elastic_password`, `kibana_system_password`, `kibana_encryption_key` | Elastic Stack |
 | [Nextcloud serverinfo token](#nextcloud-serverinfo-token) | Nextcloud VM | monitoring: `nextcloud_serverinfo_token` | metrics exporter |
+| [Proxmox MCP token](#proxmox-mcp-token) | Proxmox | the MCP client's config on your machine (not in a repo) | AI agents reading Proxmox state |
 | [Proxmox exporter token](#proxmox-exporter-token) | Proxmox | monitoring: `pve_exporter_token_*` (optional) | pve-exporter |
 | [Tailscale auth key](#tailscale-auth-key) | Tailscale | workloads/nextcloud: `tailscale_authkey` (optional) | first `tailscale up` |
 | [TrueNAS SMB account](#truenas-smb-account) | TrueNAS | workloads/nextcloud: `nextcloud_nas_user`, `nextcloud_nas_password` | Nextcloud external storage |
@@ -141,16 +145,19 @@ through PiHole, and TLS verification is on (`PROXMOX_TLS_INSECURE=false` in
 Proxmox node:
 
 ```bash
-pveum role add PackerRole -privs "VM.Config.Disk VM.Config.Cloudinit SDN.Use VM.Snapshot VM.PowerMgmt Datastore.Allocate VM.GuestAgent.Unrestricted VM.Config.Network VM.Config.CDROM VM.Console VM.Backup VM.Migrate VM.Config.Options VM.Clone VM.GuestAgent.Audit VM.Snapshot.Rollback Pool.Audit VM.Config.CPU VM.Config.HWType Datastore.AllocateSpace Datastore.Audit VM.Allocate VM.Config.Memory VM.Audit"
-pveum user add packer@pve --password '<choose one>'
-pveum aclmod / -user packer@pve -role PackerRole
+pveum role add PackerProv -privs "Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit SDN.Use Sys.Modify VM.Allocate VM.Audit VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt"
+pveum user add packer@pve
+pveum aclmod / -user packer@pve -role PackerProv
 pveum user token add packer@pve packer-automation --privsep 0   # prints the secret ONCE
 ```
 
 Store in core: `proxmox_packer_token_id` (`packer@pve!packer-automation`) and
 `proxmox_packer_token_secret`. If a build fails with
 `403 Permission check failed … VM.Config.Cloudinit`, the live role has drifted
-from this list — re-run the first line as `pveum role modify PackerRole -privs "…"`.
+from this list — re-run the first line as `pveum role modify PackerProv -privs "…"`,
+or run `proxmox/configure.sh`, which does the same. (The live role is
+`PackerProv`; earlier versions of this doc named a `PackerRole` with a longer
+list that was never what the node ran.)
 
 Rotating: `pveum user token remove packer@pve packer-automation`, re-add,
 update the secret.
@@ -284,6 +291,23 @@ sudo docker exec -u www-data nextcloud-aio-nextcloud \
 
 Rotating: run both again, update `nextcloud_serverinfo_token`, then
 `mise run play playbooks/45-exporters.yml` in monitoring.
+
+## Proxmox MCP token
+
+`mcp@pve!mcp` — **read-only** (`McpReadOnlyRole`: `Datastore.Audit Pool.Audit
+Sys.Audit VM.Audit`), for a Proxmox MCP server that lets an AI agent read the
+node's state. It cannot start, stop, change or create anything; that ACL, not
+the MCP server's own settings, is the guarantee.
+
+```bash
+pveum role add McpReadOnlyRole -privs "Datastore.Audit Pool.Audit Sys.Audit VM.Audit"
+pveum user add mcp@pve --comment "Read-only MCP access"
+pveum aclmod / -user mcp@pve -role McpReadOnlyRole
+pveum user token add mcp@pve mcp --privsep 0   # prints the secret ONCE
+```
+
+Stored in the MCP client's configuration on your machine, not in any repo.
+Rotating: remove and re-add the token, update the client.
 
 ## Proxmox exporter token
 

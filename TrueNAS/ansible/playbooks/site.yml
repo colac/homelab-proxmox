@@ -1,0 +1,7 @@
+---
+# Everything declared about TrueNAS. The USB backup run (20-backup-usb.yml) is
+# deliberately not part of it — it needs the disk plugged in.
+#
+#   mise run truenas:play playbooks/site.yml --check --diff
+- name: TrueNAS configuration
+  import_playbook: 10-truenas.yml

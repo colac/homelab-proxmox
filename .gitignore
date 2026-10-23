@@ -48,6 +48,9 @@ ansible.log
 dns/ansible/inventory/pihole.yml
 # dns/ — hand-authored resolvers outside Terraform (the Raspberry Pi): addresses.
 dns/ansible/inventory/hosts.yml
+# updates/ — machine state (addresses, VM IDs) and the reports it writes.
+updates/inventory/hosts.yml
+updates/reports/
 # Legacy: secrets moved to the SOPS-encrypted secrets.yaml at the repo root.
 # Kept ignored so an old local vault.yml can never be committed by accident.
 ansible/vault.yml

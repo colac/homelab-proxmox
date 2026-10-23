@@ -1,0 +1,36 @@
+---
+# A Proxmox snapshot of this guest before anything changes, taken on the node
+# as root; the oldest preupdate_* ones beyond update_snapshot_keep are removed.
+# Roll back on the node: qm rollback <vmid> <name> (VM), pct rollback (container).
+- name: Name the snapshot
+  ansible.builtin.set_fact:
+    update_snapshot_name: "preupdate_{{ now(fmt='%Y%m%d_%H%M') }}"
+    _update_pve_cli: "{{ 'qm' if update_kind == 'vm' else 'pct' }}"
+    _update_pve_path: >-
+      /nodes/{{ update_host_plan.guest.node }}/{{ update_host_plan.guest.type }}/{{ update_host_plan.guest.vmid }}/snapshot
+
+- name: Snapshot on Proxmox
+  ansible.builtin.command:
+    argv: ["{{ _update_pve_cli }}", snapshot, "{{ update_host_plan.guest.vmid }}", "{{ update_snapshot_name }}",
+           --description, "Before the homelab update procedure"]
+  delegate_to: "{{ groups['proxmox_hosts'][0] }}"
+  become: false
+  changed_when: true
+
+- name: List this guest's snapshots
+  ansible.builtin.command:
+    argv: [pvesh, get, "{{ _update_pve_path }}", --output-format, json]
+  delegate_to: "{{ groups['proxmox_hosts'][0] }}"
+  become: false
+  register: _update_snapshots
+  changed_when: false
+
+- name: Remove the oldest pre-update snapshots
+  ansible.builtin.command:
+    argv: ["{{ _update_pve_cli }}", delsnapshot, "{{ update_host_plan.guest.vmid }}", "{{ item }}"]
+  loop: >-
+    {{ (_update_snapshots.stdout | from_json | selectattr('name', 'match', '^preupdate_')
+        | sort(attribute='snaptime') | map(attribute='name') | list)[:-(update_snapshot_keep | int)] }}
+  delegate_to: "{{ groups['proxmox_hosts'][0] }}"
+  become: false
+  changed_when: true

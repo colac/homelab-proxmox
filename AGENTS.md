@@ -8,9 +8,12 @@ rules below are the ones that must hold in every session.
 
 The core layer of a three-repo Proxmox homelab: Packer templates, the
 `base-vm` Terraform module, the `colac.homelab` Ansible collection
-(`common`, `docker_data`) — and one platform service, **DNS** (`dns/`: Pi-hole
-in an LXC container). Apart from `dns/`, nothing here touches a running
-machine. Siblings in `~/git-repos/`:
+(`common`, `docker_data`) — one platform service, **DNS** (`dns/`: Pi-hole
+in an LXC container), and the **Proxmox host** itself (`proxmox/`: API
+identities, backups) — plus their updates (`updates/`). Apart from those two,
+nothing here touches a running machine. The collection also ships the update
+procedure every repo runs for its own machines (`colac.homelab.update`).
+Siblings in `~/git-repos/`:
 
 - `homelab-proxmox-monitoring` — the Elastic Stack VM, agents on every host
 - `homelab-proxmox-workloads` — the apps (Nextcloud, k3s), one folder each
@@ -27,11 +30,15 @@ what consumers must do. Elastic and Nextcloud work belongs in those repos.
   rotate, add
 - [dns/README.md](dns/README.md) and [dns/AGENTS.md](dns/AGENTS.md) — the LAN
   resolver; read before touching `dns/`
+- [proxmox/README.md](proxmox/README.md) — the node's roles, users, tokens
+  and config backup; every identity there mirrors CREDENTIALS.md
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — mise tasks, conventions,
   releasing and bumping pins
 - [packer/README.md](packer/README.md), [terraform/README.md](terraform/README.md),
   [ansible/README.md](ansible/README.md) — each component, with the reasons
   behind the decisions below
+- [docs/UPDATES.md](docs/UPDATES.md) — the update procedure each repo runs,
+  what it may change, and the policy for running it unattended
 - [TODO.md](TODO.md) — status; check items off there, never in this file
 
 ## Commands
@@ -45,7 +52,8 @@ mise run secrets:check                            # missing key names only
 
 Need credentials — ask the human first: `mise run packer:validate <release>`,
 `mise run packer:build <release>`, and every `mise run dns:*` except
-`dns:inventory`.
+`dns:inventory`. No credentials, but they reach live machines — ask first
+too: `mise run update`, `mise run update:apply`.
 
 ## Rules
 
