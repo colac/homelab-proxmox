@@ -50,7 +50,7 @@ No modules.
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | Container hostname. The Ansible inventory host is hostname + "-ct", because a host and a group must not share a name. | `string` | `"pihole"` | no |
 | <a name="input_hwaddr"></a> [hwaddr](#input\_hwaddr) | Fixed MAC address of eth0 (Proxmox's BC:24:11 prefix), so the router's DHCP reservation for ip\_address survives a rebuild. | `string` | `"BC:24:11:00:01:53"` | no |
 | <a name="input_ip_address"></a> [ip\_address](#input\_ip\_address) | Fixed IPv4 address of this (failover) resolver. The router hands it out as DNS server 2, after the Raspberry Pi at 192.168.1.53. | `string` | `"192.168.1.153"` | no |
-| <a name="input_memory_mb"></a> [memory\_mb](#input\_memory\_mb) | Memory in MB. Pi-hole uses well under 200 MB. | `number` | `512` | no |
+| <a name="input_memory_mb"></a> [memory\_mb](#input\_memory\_mb) | Memory in MB (swap is the same). Pi-hole uses well under 200 MB; the rest is for the Elastic Agent the monitoring repo enrolls, which Elastic measures at ~220-280 MB RSS before integrations are added. | `number` | `1024` | no |
 | <a name="input_network_bridge"></a> [network\_bridge](#input\_network\_bridge) | Proxmox bridge for eth0. | `string` | `"vmbr0"` | no |
 | <a name="input_ostemplate"></a> [ostemplate](#input\_ostemplate) | LXC template the container is created from. It must already be on the node: `pveam download local <name>` (see dns/README.md). Changing it re-creates the container. | `string` | `"local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"` | no |
 | <a name="input_pm_api_token_id"></a> [pm\_api\_token\_id](#input\_pm\_api\_token\_id) | This is an API token you have previously created for a specific user. | `string` | n/a | yes |

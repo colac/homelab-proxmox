@@ -23,7 +23,7 @@ Proxmox API. That is why it lives in core rather than in workloads.
 |---|---|
 | Config | `ansible/inventory/group_vars/pihole.yml` — records, upstreams, blocklists |
 | Secrets | `dns/secrets.yaml`: `dns_zone`, `pihole_web_password` |
-| Container | Debian 13 LXC, unprivileged, 1 core, 512 MB, 4G, fixed MAC; starts first on boot. State: Terraform Cloud workspace `DNS` |
+| Container | Debian 13 LXC, unprivileged, 1 core, 1 GB (Pi-hole + the Elastic Agent), 4G, fixed MAC; starts first on boot. State: Terraform Cloud workspace `DNS` |
 | Raspberry Pi | Raspberry Pi OS Lite 64-bit — Debian 13, the same base as the container |
 | Admin UI | `http://192.168.1.153/admin` (and `http://192.168.1.53/admin` once the Pi exists) |
 
