@@ -370,14 +370,17 @@ autoinstall:
           actions may be monitored if unauthorized usage is suspected.
           ***************************************************************************
 
-      # Automatic security updates
+      # Automatic security updates. The placeholders are unattended-upgrades'
+      # own, escaped for templatefile(): `$$` + `{` renders as a dollar-brace.
+      # Escaped any other way they reach the VM verbatim, and
+      # unattended-upgrades crashes on them and never upgrades anything.
       - path: /etc/apt/apt.conf.d/50unattended-upgrades
         content: |
           Unattended-Upgrade::Allowed-Origins {
-              "$$\{distro_id\}:$$\{distro_codename\}";
-              "$$\{distro_id\}:$$\{distro_codename\}-security";
-              "$$\{distro_id\}ESMApps:$$\{distro_codename\}-apps-security";
-              "$$\{distro_id\}ESM:$$\{distro_codename\}-infra-security";
+              "$${distro_id}:$${distro_codename}";
+              "$${distro_id}:$${distro_codename}-security";
+              "$${distro_id}ESMApps:$${distro_codename}-apps-security";
+              "$${distro_id}ESM:$${distro_codename}-infra-security";
           };
           Unattended-Upgrade::AutoFixInterruptedDpkg "true";
           Unattended-Upgrade::MinimalSteps "true";
