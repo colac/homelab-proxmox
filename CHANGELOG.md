@@ -1,3 +1,18 @@
+# [2.2.0](https://github.com/colac/homelab-proxmox/compare/v2.1.0...v2.2.0) (2026-10-23)
+
+
+### Bug Fixes
+
+* **scripts:** report a disk with smart disabled as unknown, not failed ([149dffa](https://github.com/colac/homelab-proxmox/commit/149dffa3a6d6f87c1062f3f265e2d34075310182))
+
+
+### Features
+
+* **ansible:** add the update procedure every repo runs for its machines ([f6101bc](https://github.com/colac/homelab-proxmox/commit/f6101bc6d31f471b4d8acc577e3ce9f9d410a332))
+* **dns:** give the pi-hole container 1 gb and list it as an agent target ([3262cfb](https://github.com/colac/homelab-proxmox/commit/3262cfb883cb4669208a3720bc21df58c70afb4a))
+* **proxmox:** script the node's api identities, media and config backup ([a90b728](https://github.com/colac/homelab-proxmox/commit/a90b72827aa3b525582464408e9eedb10d4ce25b))
+* **truenas:** declare users, shares and the usb backup in ansible ([b700695](https://github.com/colac/homelab-proxmox/commit/b70069551b4f0e6d2b68a999cba11552e66462b3))
+
 # [2.1.0](https://github.com/colac/homelab-proxmox/compare/v2.0.1...v2.1.0) (2026-10-07)
 
 
