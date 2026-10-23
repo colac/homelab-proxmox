@@ -1,14 +1,24 @@
 ---
-# On a Proxmox node that is not itself an update target here: only its guest
-# list, which identifies the targets for snapshots and container restarts.
-- name: List the node's VMs and containers
+# The Proxmox node's guest list, which identifies each target for snapshots
+# and container restarts (and, where the node is itself a target, shows the
+# guests no repo covers). Delegated from the targets' play, so --limit can
+# never leave it out; kept on localhost for the plan.
+- name: List the Proxmox node's VMs and containers
   ansible.builtin.script:
     cmd: "host_facts.py {{ {'guests_only': true} | to_json | b64encode }}"
     executable: python3
+  delegate_to: "{{ groups['proxmox_hosts'][0] }}"
+  run_once: true
+  become: false
   register: _update_guests
   changed_when: false
   check_mode: false
+  when: groups['proxmox_hosts'] | default([]) | length > 0
 
 - name: Keep the guest list for the plan
   ansible.builtin.set_fact:
-    update_facts: "{{ _update_guests.stdout | from_json }}"
+    update_guest_list: "{{ (_update_guests.stdout | from_json).proxmox_guests }}"
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  when: _update_guests is not skipped

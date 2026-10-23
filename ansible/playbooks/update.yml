@@ -6,43 +6,32 @@
 #     -e update_reboot=true      … and reboot guests that need it
 #     -e update_allow_pve=true   … and the Proxmox host's packages (core)
 #     -e '{"update_force": ["Nextcloud AIO"]}'   … run a component's update anyway
+#     --limit <host>             … only that host (the plan and the guest list
+#                                still come along: they run from this play)
 #
 # Consumers wrap it in their own `mise run update` tasks; the inventory
 # contract is in roles/update/defaults/main.yml, the rules in core's
 # docs/UPDATES.md.
-- name: Before — read every update target
+- name: Before — read every update target, list the Proxmox guests, plan
   hosts: update_targets
   gather_facts: false
+  vars:
+    update_phase: before
   tasks:
     - name: Gather update facts
       ansible.builtin.include_role:
         name: colac.homelab.update
         tasks_from: gather
-      vars:
-        update_phase: before
 
-- name: Before — read the Proxmox node's guest list
-  hosts: proxmox_hosts:!update_targets
-  gather_facts: false
-  tasks:
-    - name: List guests
+    - name: List the Proxmox node's guests
       ansible.builtin.include_role:
         name: colac.homelab.update
         tasks_from: guests
 
-- name: Before — report and plan
-  hosts: localhost
-  gather_facts: false
-  # The controller: never sudo, even where a consumer's ansible.cfg sets
-  # become = True for its hosts.
-  become: false
-  tasks:
     - name: Compare with upstream and plan
       ansible.builtin.include_role:
         name: colac.homelab.update
         tasks_from: plan
-      vars:
-        update_phase: before
 
 - name: Apply, one host at a time in inventory order
   hosts: update_targets
@@ -56,9 +45,11 @@
         tasks_from: apply
       when: update_apply | default(false) | bool
 
-- name: After — read every update target again
+- name: After — read every update target again and report
   hosts: update_targets
   gather_facts: false
+  vars:
+    update_phase: after
   tasks:
     - name: Gather update facts
       ansible.builtin.include_role:
@@ -66,17 +57,8 @@
         tasks_from: gather
       when: update_apply | default(false) | bool
 
-- name: After — report
-  hosts: localhost
-  gather_facts: false
-  # The controller: never sudo, even where a consumer's ansible.cfg sets
-  # become = True for its hosts.
-  become: false
-  tasks:
     - name: Compare with upstream and report
       ansible.builtin.include_role:
         name: colac.homelab.update
         tasks_from: plan
-      vars:
-        update_phase: after
       when: update_apply | default(false) | bool

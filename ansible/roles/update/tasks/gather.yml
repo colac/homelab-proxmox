@@ -11,7 +11,6 @@
       refresh: "{{ update_gather_refresh | default(true) }}"
       components: "{{ update_components | selectattr('hosts', 'contains', inventory_hostname) | list }}"
       checks: "{{ update_checks }}"
-      proxmox_guests: "{{ inventory_hostname in groups['proxmox_hosts'] | default([]) }}"
   register: _update_gather
   changed_when: false
   check_mode: false
