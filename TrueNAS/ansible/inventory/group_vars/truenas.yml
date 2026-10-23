@@ -1,0 +1,113 @@
+---
+# The TrueNAS configuration, declared. Field names are the TrueNAS API's
+# (v25.10): https://api.truenas.com/v25.10/ — see roles/truenas/defaults for
+# how each list is identified and what is immutable.
+#
+# Managed here means: change it HERE, not in the UI, or the next run puts it
+# back. Pools, network, certificates and other one-time settings are manual
+# (TrueNAS/README.md).
+
+# ---------------------------------------------------------------------------
+# Groups and users — from the live system (discovery, 2026-10-16). UIDs and
+# GIDs are today's values: pool files and ACLs are owned by number.
+# truenas_admin and the builtin_* accounts are TrueNAS's own: not managed.
+# Membership is declared on the user (`groups`), not on the group.
+# ---------------------------------------------------------------------------
+truenas_groups:
+  # Primary groups of the two SMB users.
+  - {name: nextcloud_user, gid: 3000, smb: false}
+  - {name: home_user, gid: 3001, smb: false}
+  # Has MODIFY on the media share's ACL: membership is what grants SMB access.
+  - {name: smb_users, gid: 3002, smb: true}
+
+truenas_users:
+  # Nextcloud's external storage logs in as this user; its password is
+  # workloads' nextcloud/secrets.yaml (nextcloud_nas_password).
+  - username: nextcloud_user
+    uid: 3000
+    full_name: nextcloud_user
+    group: nextcloud_user
+    groups: [smb_users, builtin_users]
+    smb: true
+    home: /var/empty
+    shell: /usr/sbin/nologin
+  # The household's SMB login (PCs, phones).
+  - username: home_user
+    uid: 3001
+    full_name: home_user
+    group: home_user
+    groups: [smb_users, builtin_users]
+    smb: true
+    home: /var/empty
+    shell: /usr/sbin/nologin
+
+# ---------------------------------------------------------------------------
+# Datasets and shares — from the live system (discovery, 2026-10-16).
+# The pools' root datasets (hdd-home-1, backup-usb) come with the pools and
+# are not declared; backup-usb/media is created by the replication task.
+# ---------------------------------------------------------------------------
+truenas_datasets:
+  # share_type SMB sets what discovery shows on all three: NFSv4 ACLs,
+  # aclmode RESTRICTED, case-insensitive names. Both are fixed at creation.
+  - {name: hdd-home-1/media, share_type: SMB, casesensitivity: INSENSITIVE}
+  - {name: hdd-home-1/media/hugo, share_type: SMB, casesensitivity: INSENSITIVE}
+  - {name: hdd-home-1/media/marta, share_type: SMB, casesensitivity: INSENSITIVE}
+
+truenas_smb_shares:
+  # Access comes from the dataset's ACL (root:root; builtin_administrators
+  # FULL_CONTROL, smb_users MODIFY), which lives on the pool, not here.
+  - name: media
+    path: /mnt/hdd-home-1/media
+    purpose: DEFAULT_SHARE
+    comment: ""
+    enabled: true
+    readonly: false
+    browsable: true
+    access_based_share_enumeration: false
+
+# NFS is off; the Nextcloud Borg export will be the first (workloads).
+truenas_nfs_shares: []
+
+# ---------------------------------------------------------------------------
+# Backups: daily snapshots of everything under media, copied to the USB disk.
+#
+# The disk (pool backup-usb, created by hand, encrypted with a key kept in the
+# password manager) is plugged in for a run and stored elsewhere otherwise:
+#   mise run truenas:play playbooks/20-backup-usb.yml
+# ---------------------------------------------------------------------------
+truenas_snapshot_tasks:
+  # Kept 8 weeks so a common snapshot survives a month or more without the
+  # disk: incremental sends need one on both sides, and the replication task
+  # never starts from scratch (allow_from_scratch: false) — that would wipe
+  # the backup first.
+  - dataset: hdd-home-1/media
+    recursive: true
+    naming_schema: "auto-%Y-%m-%d_%H-%M"
+    schedule: {minute: "00", hour: "01", dom: "*", month: "*", dow: "*", begin: "00:00", end: "23:59"}
+    lifetime_value: 8
+    lifetime_unit: WEEK
+    allow_empty: false
+    enabled: true
+
+truenas_replication_tasks:
+  - name: media-to-backup-usb
+    direction: PUSH
+    transport: LOCAL
+    source_datasets: [hdd-home-1/media]
+    target_dataset: backup-usb/media
+    recursive: true
+    periodic_snapshot_tasks:
+      - {dataset: hdd-home-1/media, naming_schema: "auto-%Y-%m-%d_%H-%M"}
+    # Run on demand (20-backup-usb.yml): the disk is unplugged most days.
+    auto: false
+    # The pool is encrypted; the copy takes the pool's key instead of
+    # arriving in plaintext from the unencrypted source.
+    encryption: true
+    encryption_inherit: true
+    # Snapshots on the disk outlive the source's 8 weeks: monthly history.
+    retention_policy: CUSTOM
+    lifetime_value: 6
+    lifetime_unit: MONTH
+    allow_from_scratch: false
+    readonly: SET
+    enabled: true

@@ -1,0 +1,40 @@
+---
+# defaults file for truenas
+#
+# Every list is declared in inventory/group_vars/truenas.yml. Each item is the
+# TrueNAS API's own fields (v25.10, https://api.truenas.com/v25.10/) for that
+# object's create method, plus `state: absent` to remove it. Only the fields
+# an item lists are managed; everything else keeps TrueNAS's value.
+
+# group.create fields. `gid` is required and immutable here: files on the pool
+# are owned by number, so a group re-created with another GID loses them.
+truenas_groups: []
+
+# user.create fields. `uid` is required and immutable for the same reason.
+# `group` (primary) and `groups` (extra) are group NAMES — resolved to ids.
+# Passwords are never managed for existing users; a new user takes
+# `password_env` (an environment variable from TrueNAS/secrets.yaml) or, if
+# absent, `random_password: true` and the password is reset in the UI.
+truenas_users: []
+
+# pool.dataset.create fields. `name` is the full path (hdd-home-1/media).
+# Deleting needs `state: absent` AND `allow_delete: true` — it deletes data.
+truenas_datasets: []
+
+# sharing.smb.create fields; `name` identifies the share. 25.10 keeps the
+# purpose-specific settings in `options` (e.g. {purpose: DEFAULT_SHARE,
+# hostsallow: [...]}).
+truenas_smb_shares: []
+
+# sharing.nfs.create fields; `path` identifies the export.
+truenas_nfs_shares: []
+
+# pool.snapshottask.create fields; `dataset` + `naming_schema` identify a task.
+truenas_snapshot_tasks: []
+
+# replication.create fields; `name` identifies a task. `periodic_snapshot_tasks`
+# lists {dataset, naming_schema} of tasks declared above — resolved to ids.
+truenas_replication_tasks: []
+
+# Keys that steer the role and are never sent to the API.
+truenas_control_keys: [state, password_env, allow_delete]

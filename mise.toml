@@ -57,10 +57,11 @@ description = "Every pre-commit hook on every file, then ansible-lint"
 run = ["pre-commit run --all-files", { task = "lint:ansible" }]
 
 [tasks."lint:ansible"]
-description = "ansible-lint (production profile) on the colac.homelab collection and dns/ansible"
+description = "ansible-lint (production profile) on the colac.homelab collection, dns/ansible and TrueNAS/ansible"
 run = '''
 (cd ansible && ansible-lint)
 (cd dns/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml --syntax-check)
+(cd TrueNAS/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml playbooks/20-backup-usb.yml playbooks/90-selftest.yml --syntax-check)
 '''
 
 [tasks."tf:validate"]
@@ -128,6 +129,23 @@ run = "{{config_root}}/.mise/sops-exec dns ansible-playbook"
 description = "Show the Pi-hole inventory (no credentials)"
 dir = "{{config_root}}/dns/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
+run = "ansible-inventory --graph"
+
+# --------------------------------------------------------------------------
+# TrueNAS — users, shares, snapshot and backup tasks, through its API
+# (TrueNAS/ansible). No secrets yet: existing users keep their passwords and
+# new ones get a random one. No sudo: midclt runs as truenas_admin.
+# --------------------------------------------------------------------------
+[tasks."truenas:play"]
+description = "ansible-playbook for TrueNAS: mise run truenas:play playbooks/site.yml --check --diff"
+dir = "{{config_root}}/TrueNAS/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
+run = "ansible-playbook"
+
+[tasks."truenas:inventory"]
+description = "Show the TrueNAS inventory (no credentials)"
+dir = "{{config_root}}/TrueNAS/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
 run = "ansible-inventory --graph"
 
 # --------------------------------------------------------------------------
