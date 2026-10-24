@@ -1,3 +1,10 @@
+## [2.2.3](https://github.com/colac/homelab-proxmox/compare/v2.2.2...v2.2.3) (2026-10-24)
+
+
+### Bug Fixes
+
+* **truenas:** take daily snapshots even when media is unchanged ([49e24c4](https://github.com/colac/homelab-proxmox/commit/49e24c4a8814c63987eaa55e24525deac15837e9))
+
 ## [2.2.2](https://github.com/colac/homelab-proxmox/compare/v2.2.1...v2.2.2) (2026-10-23)
 
 
