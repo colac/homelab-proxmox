@@ -86,7 +86,10 @@ truenas_snapshot_tasks:
     schedule: {minute: "00", hour: "01", dom: "*", month: "*", dow: "*", begin: "00:00", end: "23:59"}
     lifetime_value: 8
     lifetime_unit: WEEK
-    allow_empty: false
+    # Snapshot even when nothing changed: media sits still for weeks, and
+    # skipped empty snapshots would let the last one age out, leaving no
+    # common snapshot with the disk. Empty ones cost next to nothing.
+    allow_empty: true
     enabled: true
 
 truenas_replication_tasks:
