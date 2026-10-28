@@ -62,6 +62,8 @@ too: `mise run update`, `mise run update:apply`.
   `sops decrypt` or `.mise/sops-exec`. Refer to secrets by key name
   (`secrets.yaml.example`) and use `mise run secrets:check`. New secret →
   [CREDENTIALS.md § Adding a secret](docs/CREDENTIALS.md#adding-a-secret).
+  Never commit with `--no-verify`: the `sops-encrypted` pre-commit hook is
+  what keeps a plaintext secret out of these public repos.
 - **Git:** Conventional Commits; never edit `CHANGELOG.md` or version numbers;
   commit only when asked; the human pushes.
 - **Ansible:** ansible-lint stays green at the production profile; role

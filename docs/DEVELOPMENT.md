@@ -71,7 +71,11 @@ design — run them through the tasks.
   footer → major.
 - **pre-commit** runs on every commit (`mise run lint` runs it on all files):
   terraform_docs and terraform_fmt, packer_fmt and syntax-only packer_validate
-  (core), markdownlint, shellcheck, editorconfig, commitlint.
+  (core), markdownlint, shellcheck, editorconfig, commitlint. When a
+  `secrets.yaml` changes, two more: `sops-encrypted`
+  (`scripts/check-sops-encrypted.py`, in every repo) refuses a file that is
+  not SOPS ciphertext throughout, and `secrets-check` runs
+  `mise run secrets:check`.
 - **ansible-lint must pass at the production profile** (each `ansible/` has an
   `.ansible-lint`). Role variables and `register:` names are prefixed with the
   role name (`_docker_data_current_mount`). Non-secret values shared across
