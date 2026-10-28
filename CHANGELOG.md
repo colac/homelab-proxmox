@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/colac/homelab-proxmox/compare/v2.2.3...v2.3.0) (2026-10-28)
+
+
+### Features
+
+* **base-vm:** start vms when the proxmox node boots ([68d5ffe](https://github.com/colac/homelab-proxmox/commit/68d5ffe6a614235facfea191d1f6a7d44219c85c))
+
 ## [2.2.3](https://github.com/colac/homelab-proxmox/compare/v2.2.2...v2.2.3) (2026-10-24)
 
 
