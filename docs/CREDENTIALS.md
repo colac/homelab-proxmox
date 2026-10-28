@@ -41,6 +41,12 @@ mise run secrets:edit [app]   # decrypt into VS Code, re-encrypt on save
 mise run secrets:check        # names of missing keys; never prints a value
 ```
 
+Both checks also run by themselves: committing a `secrets.yaml` runs
+`secrets:check`, and a pre-commit hook refuses the commit if the file is not
+encrypted throughout — a decrypted copy, or a value typed in outside
+`secrets:edit`. The repos are public, so that hook is what keeps a plaintext
+secret off GitHub; never commit with `--no-verify`.
+
 What stays out of git entirely: the age private key, the SSH deploy key's
 private half, `mise.local.toml`, and any `*.tfvars` / `*.pkrvars.hcl`.
 Monitoring's generated Elastic material (`ansible/.certs/`,
