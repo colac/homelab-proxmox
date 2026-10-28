@@ -60,6 +60,13 @@ workloads for Nextcloud and k3s.
       unreleased module first (`mise run deps:dev`), release, then bump
       `?ref=` and `requirements.yml` to `v2.0.1`; each plan should say
       "No changes"
+- [x] **VMs stayed off after a host reboot** (2026-10-28): the provider
+      leaves `onboot` off, so nextcloud and monitoring stayed stopped from
+      2026-10-24 until started by hand (Pi-hole, with `onboot`, came back).
+      `base-vm` now sets `start_at_node_boot` (default `true`)
+- [ ] **Roll it out**: bump `?ref=` and `requirements.yml` in monitoring and
+      workloads to the release; each plan should show only
+      `start_at_node_boot` changing in place
 
 ## DNS (homelab-wide)
 

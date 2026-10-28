@@ -23,6 +23,11 @@ resource "proxmox_vm_qemu" "ubuntu_vm" {
   }
   memory = var.memory_mb
 
+  # The provider leaves this off, and then a host reboot (a kernel update, a
+  # power cut) leaves the VM stopped until someone starts it by hand. With no
+  # startup order, Proxmox starts it after the ordered guests — Pi-hole first.
+  start_at_node_boot = var.start_at_node_boot
+
   # Proxmox reports an unset startup/shutdown order as -1 for each field, and
   # the provider stores that as a startup_shutdown block on every refresh.
   # Left undeclared, every plan proposes deleting the block — and applying

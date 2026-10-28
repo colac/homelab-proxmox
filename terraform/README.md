@@ -58,6 +58,10 @@ Packer template clone reliably:
   is used, and only for login access; app config is Ansible's.
 - **`agent = 1`** — the QEMU guest agent is what lets Terraform report the
   VM's DHCP-assigned IP as an output.
+- **`start_at_node_boot`** (default `true`) — the VM starts when the Proxmox
+  host boots, after the guests that have a startup order (Pi-hole first). The
+  provider's own default is off, which left every VM stopped after a host
+  reboot.
 - **`data_disk_size`** — an optional second disk, turned into `docker-vg` by
   the `colac.homelab.docker_data` role. `null` for a VM meant to *receive* an
   existing data disk.
