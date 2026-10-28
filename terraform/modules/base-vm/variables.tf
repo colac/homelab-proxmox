@@ -33,6 +33,12 @@ variable "memory_mb" {
   default = 8192
 }
 
+variable "start_at_node_boot" {
+  type        = bool
+  description = "Start the VM when the Proxmox node boots. false leaves it stopped after every host reboot."
+  default     = true
+}
+
 variable "disk0_size" {
   type        = string
   description = "OS disk size. Must be >= the Packer template's disk — Telmate cannot shrink a cloned disk. The 26.04 template ships 24G with LVM; only /opt and the OS live here."
