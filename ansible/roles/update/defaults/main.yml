@@ -15,6 +15,11 @@
 update_apply: false
 # Reboot guests that need it after applying. Never the Proxmox host.
 update_reboot: false
+# Reboot the Proxmox host when it needs it (core). Every guest goes down with
+# it: apply refuses while a running guest does not start at boot, and waits
+# until every guest that was running runs again. Put the node last in the
+# inventory, so its guests are done first.
+update_reboot_pve: false
 # Let apply change the Proxmox host's own packages.
 update_allow_pve: false
 # Component names whose apply_role runs even when the report says current.

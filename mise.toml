@@ -143,6 +143,24 @@ dir = "{{config_root}}/TrueNAS/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
 run = "ansible-playbook"
 
+[tasks."truenas:update"]
+description = "Report TrueNAS's pending update, boot environments, pools and running jobs; changes nothing"
+dir = "{{config_root}}/TrueNAS/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
+run = "ansible-playbook playbooks/30-update.yml"
+
+[tasks."truenas:update:backup"]
+description = "Back up TrueNAS's config to the laptop and snapshot its data pools; no update"
+dir = "{{config_root}}/TrueNAS/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
+run = "ansible-playbook playbooks/30-update.yml -e truenas_update_mode=backup"
+
+[tasks."truenas:update:apply"]
+description = "Back up config and data, keep the boot environment, install the update, reboot and verify"
+dir = "{{config_root}}/TrueNAS/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
+run = "ansible-playbook playbooks/30-update.yml -e truenas_update_mode=apply"
+
 [tasks."truenas:inventory"]
 description = "Show the TrueNAS inventory (no credentials)"
 dir = "{{config_root}}/TrueNAS/ansible"
@@ -162,7 +180,7 @@ env = { ANSIBLE_CONFIG = "{{config_root}}/updates/ansible.cfg" }
 run = "ansible-playbook colac.homelab.update"
 
 [tasks."update:apply"]
-description = "Snapshot Pi-hole, then apt and pihole -up (-e update_reboot=true, -e update_allow_pve=true)"
+description = "Snapshot Pi-hole, then apt and pihole -up (-e update_reboot=true, -e update_allow_pve=true, -e update_reboot_pve=true)"
 dir = "{{config_root}}/updates"
 env = { ANSIBLE_CONFIG = "{{config_root}}/updates/ansible.cfg" }
 run = "ansible-playbook colac.homelab.update -e update_apply=true"

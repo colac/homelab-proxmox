@@ -5,6 +5,8 @@
 #   ansible-playbook colac.homelab.update -e update_apply=true    snapshot, apt, apps
 #     -e update_reboot=true      … and reboot guests that need it
 #     -e update_allow_pve=true   … and the Proxmox host's packages (core)
+#     -e update_reboot_pve=true  … and reboot the Proxmox host last, when it
+#                                needs it (core; every guest restarts with it)
 #     -e '{"update_force": ["Nextcloud AIO"]}'   … run a component's update anyway
 #     --limit <host>             … only that host (the plan and the guest list
 #                                still come along: they run from this play)

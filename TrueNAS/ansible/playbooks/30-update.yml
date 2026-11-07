@@ -1,0 +1,352 @@
+---
+# TrueNAS's update procedure: the same idea as colac.homelab.update (report,
+# then apply with a way back), through TrueNAS's own API.
+#
+#   mise run truenas:update            report only: changes nothing
+#   mise run truenas:update:backup     config backup + pool snapshots, no update
+#   mise run truenas:update:apply      backups, then update, reboot and verify
+#
+# The three ways back, all taken before anything changes:
+#   OS      the boot environment that was running, kept from automatic
+#           deletion (System → Boot → Activate, then reboot)
+#   config  config.save with the secret seed, on the laptop (never in a repo)
+#   data    a recursive preupdate-* snapshot of every data pool
+# The rollback commands are in TrueNAS/RUNBOOK.md § Updates, and printed at
+# the end of every run.
+- name: Update TrueNAS
+  hosts: truenas
+  gather_facts: false
+  vars:
+    truenas_update_mode: report   # report | backup | apply
+    # The config tar holds the secret seed and every password hash: a folder
+    # outside every repo and synced folder, readable by this user only.
+    truenas_update_config_dir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.local/share/homelab/truenas-config"
+    truenas_update_config_keep: 5
+    truenas_update_snapshot_keep: 2
+    # Jobs that may run during an update. Anything else running refuses apply.
+    truenas_update_ok_jobs: []
+  tasks:
+    # Once, as a fact: a play var holding now() is re-evaluated at every use.
+    - name: Fix this run's timestamp
+      ansible.builtin.set_fact:
+        _truenas_update_stamp: "{{ now().strftime('%Y%m%d-%H%M') }}"
+
+    # ---------------------------------------------------------------- read
+    - name: Read the version, the pending update, boot environments, pools and jobs
+      ansible.builtin.command:
+        cmd: "midclt call {{ item }}"
+      loop:
+        - system.version
+        - update.status
+        - boot.environment.query
+        - pool.query
+        - core.get_jobs '[["state", "=", "RUNNING"]]'
+        - service.query '[["state", "=", "RUNNING"]]'
+        - system.reboot.info
+      register: _truenas_update_read
+      changed_when: false
+      check_mode: false
+
+    - name: Keep what was read
+      ansible.builtin.set_fact:
+        truenas_update_version: "{{ _truenas_update_read.results[0].stdout | trim }}"
+        truenas_update_status: "{{ _truenas_update_read.results[1].stdout | from_json }}"
+        truenas_update_bes: "{{ _truenas_update_read.results[2].stdout | from_json }}"
+        truenas_update_pools: "{{ _truenas_update_read.results[3].stdout | from_json }}"
+        truenas_update_jobs: "{{ _truenas_update_read.results[4].stdout | from_json | map(attribute='method') | list }}"
+        truenas_update_services: "{{ _truenas_update_read.results[5].stdout | from_json | map(attribute='service') | list }}"
+        truenas_update_boot_id: "{{ (_truenas_update_read.results[6].stdout | from_json).boot_id }}"
+        truenas_update_config_file: >-
+          {{ truenas_update_config_dir }}/truenas-config-{{ _truenas_update_read.results[0].stdout | trim }}-{{ _truenas_update_stamp }}.tar
+
+    - name: Work out the plan
+      ansible.builtin.set_fact:
+        truenas_update_new: "{{ (truenas_update_status.status | default({}, true)).new_version | default(none, true) }}"
+        truenas_update_active_be: "{{ truenas_update_bes | selectattr('active') | map(attribute='id') | first }}"
+        truenas_update_unhealthy: >-
+          {{ truenas_update_pools | rejectattr('healthy') | map(attribute='name') | list
+             + truenas_update_pools | selectattr('scan.state', 'defined') | selectattr('scan.state', 'eq', 'SCANNING')
+               | map(attribute='name') | map('regex_replace', '$', ' (scrub or resilver running)') | list }}
+        truenas_update_blocking_jobs: "{{ truenas_update_jobs | difference(truenas_update_ok_jobs) }}"
+        truenas_update_data_pools: "{{ truenas_update_pools | map(attribute='name') | difference(truenas_update_skip_pools) | list }}"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "Running: {{ truenas_update_version }} (update profile {{ _truenas_update_profile }}, status {{ truenas_update_status.code }})"
+          - "{{ _truenas_update_line }}"
+          - "{{ (truenas_update_new.release_notes | default(''))[:700] if truenas_update_new else '' }}"
+          - "Boot environments: {{ _truenas_update_be_ids }}; active {{ truenas_update_active_be }}; kept {{ _truenas_update_kept }}"
+          - "Pools: {{ _truenas_update_pool_states }}"
+          - "Snapshot before an update: {{ truenas_update_data_pools | join(', ') }} (skipped: {{ truenas_update_skip_pools | join(', ') or 'none' }})"
+          - "Running jobs: {{ truenas_update_jobs | join(', ') or 'none' }}"
+          - "Running services: {{ truenas_update_services | join(', ') }}"
+      vars:
+        _truenas_update_profile: "{{ truenas_update_status.status.current_version.profile | default('?') }}"
+        _truenas_update_line: >-
+          {{ 'UPDATE  ' ~ truenas_update_new.version ~ ' (' ~ truenas_update_new.manifest.date[:10] ~ ')'
+             if truenas_update_new else 'ok      no update available' }}
+        _truenas_update_be_ids: "{{ truenas_update_bes | map(attribute='id') | join(', ') }}"
+        _truenas_update_kept: "{{ truenas_update_bes | selectattr('keep') | map(attribute='id') | join(', ') or 'none' }}"
+        _truenas_update_pool_states: >-
+          {{ truenas_update_pools | map(attribute='name') | zip(truenas_update_pools | map(attribute='status'))
+             | map('join', ' ') | join(', ') }}
+
+    - name: Stop here unless backing up or applying
+      ansible.builtin.meta: end_play
+      when: truenas_update_mode not in ['backup', 'apply']
+
+    - name: Refuse to change TrueNAS while a pool is unhealthy or busy, or another job runs
+      ansible.builtin.assert:
+        that:
+          - truenas_update_unhealthy | length == 0
+          - truenas_update_blocking_jobs | length == 0
+          - truenas_update_status.code == 'NORMAL'
+        fail_msg: >-
+          Not now. Pools: {{ truenas_update_unhealthy | join(', ') or 'ok' }}. Jobs running:
+          {{ truenas_update_blocking_jobs | join(', ') or 'none' }}. Update status:
+          {{ truenas_update_status.code }}. Wait for them, or fix the pool first.
+        quiet: true
+
+    # ------------------------------------------------------------- back up
+    - name: Make the config backup folder (this user only)
+      ansible.builtin.file:
+        path: "{{ truenas_update_config_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+
+    # config.save writes to a download stream, and core.download returns its
+    # one-time URL. TrueNAS fetches that from itself on 127.0.0.1 (plain HTTP
+    # never leaves the machine), and the file reaches the laptop over the same
+    # SSH as everything else. The secret seed decrypts the stored credentials,
+    # which a reinstall needs, and the root SSH keys come along. Pool keys stay
+    # out: the USB disk's key lives in the password manager, not next to its
+    # backup.
+    - name: Back up the config
+      block:
+        - name: Make a private temporary file on TrueNAS
+          ansible.builtin.tempfile:
+            suffix: .tar
+          register: _truenas_update_tmp
+
+        - name: Start the config backup
+          ansible.builtin.command:
+            cmd: >-
+              midclt call core.download config.save
+              {{ [{'secretseed': true, 'root_authorized_keys': true, 'pool_keys': false}] | to_json | quote }}
+              truenas-config.tar
+          register: _truenas_update_download
+          changed_when: false
+
+        - name: Download it on TrueNAS itself
+          ansible.builtin.command:
+            argv:
+              - curl
+              - --silent
+              - --fail
+              - --max-time
+              - "120"
+              - --output
+              - "{{ _truenas_update_tmp.path }}"
+              - "http://127.0.0.1{{ (_truenas_update_download.stdout | from_json)[1] }}"
+          changed_when: false
+
+        - name: Copy it to the laptop over SSH
+          ansible.builtin.fetch:
+            src: "{{ _truenas_update_tmp.path }}"
+            dest: "{{ truenas_update_config_file }}"
+            flat: true
+      always:
+        - name: Remove the temporary copy on TrueNAS
+          ansible.builtin.file:
+            path: "{{ _truenas_update_tmp.path }}"
+            state: absent
+          when: _truenas_update_tmp.path is defined
+
+    - name: Check the config backup on the laptop
+      ansible.builtin.stat:
+        path: "{{ truenas_update_config_file }}"
+      delegate_to: localhost
+      register: _truenas_update_config_stat
+
+    - name: Fail unless the config backup looks complete
+      ansible.builtin.assert:
+        that: _truenas_update_config_stat.stat.exists and _truenas_update_config_stat.stat.size > 10240
+        fail_msg: "The config backup {{ truenas_update_config_file }} is missing or too small: no update without it."
+        quiet: true
+
+    - name: Make the config backup readable by this user only
+      ansible.builtin.file:
+        path: "{{ truenas_update_config_file }}"
+        mode: "0600"
+      delegate_to: localhost
+
+    - name: Find older config backups
+      ansible.builtin.find:
+        paths: "{{ truenas_update_config_dir }}"
+        patterns: "truenas-config-*.tar"
+      delegate_to: localhost
+      register: _truenas_update_old_configs
+
+    - name: Keep the newest config backups only
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ (_truenas_update_old_configs.files | sort(attribute='mtime', reverse=true))[truenas_update_config_keep:] }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      delegate_to: localhost
+
+    # Not auto-*: the periodic task and the USB replication ignore these, so
+    # they expire only here.
+    - name: Snapshot every data pool, recursively
+      ansible.builtin.command:
+        cmd: >-
+          midclt call pool.snapshot.create
+          {{ {'dataset': item, 'name': 'preupdate-' ~ _truenas_update_stamp, 'recursive': true} | to_json | quote }}
+      loop: "{{ truenas_update_data_pools }}"
+      changed_when: true
+
+    - name: List the pre-update snapshots
+      ansible.builtin.command:
+        cmd: >-
+          midclt call pool.snapshot.query
+          {{ [['dataset', '=', item], ['snapshot_name', '^', 'preupdate-']] | to_json | quote }}
+          {{ {'select': ['id', 'snapshot_name']} | to_json | quote }}
+      loop: "{{ truenas_update_data_pools }}"
+      register: _truenas_update_snapshots
+      changed_when: false
+
+    # Every pool gets the same name in a run, so keeping the newest names
+    # keeps the newest runs everywhere.
+    - name: Keep the newest pre-update snapshots only
+      ansible.builtin.command:
+        cmd: "midclt call pool.snapshot.delete {{ item.id | quote }} {{ {'recursive': true} | to_json | quote }}"
+      loop: "{{ _truenas_update_all_snaps | rejectattr('snapshot_name', 'in', _truenas_update_keep_names) | list }}"
+      loop_control:
+        label: "{{ item.id }}"
+      changed_when: true
+      vars:
+        _truenas_update_all_snaps: "{{ _truenas_update_snapshots.results | map(attribute='stdout') | map('from_json') | flatten }}"
+        _truenas_update_keep_names: >-
+          {{ (_truenas_update_all_snaps | map(attribute='snapshot_name') | unique | sort(reverse=true))[:truenas_update_snapshot_keep] }}
+
+    - name: Stop here unless applying
+      ansible.builtin.meta: end_play
+      when: truenas_update_mode != 'apply'
+
+    - name: Stop here when there is nothing to install
+      ansible.builtin.meta: end_play
+      when: not truenas_update_new
+
+    # ------------------------------------------------------------- update
+    - name: Keep the running boot environment from automatic deletion
+      ansible.builtin.command:
+        cmd: "midclt call boot.environment.keep {{ {'id': truenas_update_active_be, 'value': true} | to_json | quote }}"
+      changed_when: true
+
+    # Started without -j and polled: one long midclt call over SSH can be cut
+    # off (the USB backup was), while the job runs on regardless.
+    - name: Start the update (download and install into a new boot environment)
+      ansible.builtin.command:
+        cmd: "midclt call update.run {{ {'reboot': false} | to_json | quote }}"
+      register: _truenas_update_job
+      changed_when: true
+
+    - name: Wait for the update job
+      ansible.builtin.command:
+        cmd: "midclt call core.get_jobs {{ [['id', '=', _truenas_update_job.stdout | trim | int]] | to_json | quote }}"
+      register: _truenas_update_poll
+      until: (_truenas_update_poll.stdout | from_json)[0].state in ['SUCCESS', 'FAILED', 'ABORTED']
+      retries: 240
+      delay: 15
+      changed_when: false
+
+    - name: Fail if the update did not install
+      ansible.builtin.assert:
+        that: (_truenas_update_poll.stdout | from_json)[0].state == 'SUCCESS'
+        fail_msg: >-
+          The update job ended {{ (_truenas_update_poll.stdout | from_json)[0].state }}:
+          {{ (_truenas_update_poll.stdout | from_json)[0].error }}. Nothing is active yet: TrueNAS
+          still runs {{ truenas_update_version }} from boot environment {{ truenas_update_active_be }}.
+        quiet: true
+
+    - name: Reboot into the new boot environment
+      ansible.builtin.command:
+        cmd: >-
+          midclt call system.reboot {{ ('Update to ' ~ truenas_update_new.version ~ ' (homelab update procedure)') | quote }}
+          {{ {'delay': 10} | to_json | quote }}
+      changed_when: true
+
+    - name: Wait for TrueNAS to come back
+      ansible.builtin.wait_for_connection:
+        delay: 90
+        timeout: 1800
+
+    - name: Wait until the middleware is ready on a new boot
+      ansible.builtin.command:
+        cmd: "midclt call system.reboot.info"
+      register: _truenas_update_boot
+      until: >-
+        _truenas_update_boot.rc == 0
+        and (_truenas_update_boot.stdout | from_json).boot_id != truenas_update_boot_id
+      retries: 60
+      delay: 10
+      changed_when: false
+
+    # ------------------------------------------------------------- verify
+    - name: Wait until every service that ran before runs again
+      ansible.builtin.command:
+        cmd: "midclt call service.query {{ [['state', '=', 'RUNNING']] | to_json | quote }}"
+      register: _truenas_update_services_after
+      until: >-
+        _truenas_update_services_after.rc == 0
+        and truenas_update_services | difference(_truenas_update_services_after.stdout | from_json
+                                                 | map(attribute='service') | list) | length == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Read the version, pools and boot environments again
+      ansible.builtin.command:
+        cmd: "midclt call {{ item }}"
+      loop:
+        - system.version
+        - pool.query
+        - boot.environment.query
+      register: _truenas_update_after
+      changed_when: false
+
+    - name: Fail unless the new version runs with healthy pools and the same services
+      ansible.builtin.assert:
+        that:
+          - truenas_update_new.version in (_truenas_update_after.results[0].stdout)
+          - _truenas_update_after.results[1].stdout | from_json | rejectattr('healthy') | list | length == 0
+        fail_msg: >-
+          After the reboot TrueNAS runs {{ _truenas_update_after.results[0].stdout | trim }}; unhealthy pools:
+          {{ _truenas_update_after.results[1].stdout | from_json | rejectattr('healthy') | map(attribute='name') | join(', ') or 'none' }}.
+          To go back: midclt call boot.environment.activate '{"id": "{{ truenas_update_active_be }}"}', then reboot
+          (TrueNAS/RUNBOOK.md § Updates).
+        quiet: true
+
+    # Only the environment to roll back to stays kept; earlier ones go back to
+    # TrueNAS's own cleanup, so kept environments do not pile up.
+    - name: Release the keep flag on older boot environments
+      ansible.builtin.command:
+        cmd: "midclt call boot.environment.keep {{ {'id': item, 'value': false} | to_json | quote }}"
+      loop: >-
+        {{ _truenas_update_after.results[2].stdout | from_json | selectattr('keep') | rejectattr('active')
+           | map(attribute='id') | reject('eq', truenas_update_active_be) | list }}
+      changed_when: true
+
+    - name: Done
+      ansible.builtin.debug:
+        msg:
+          - "TrueNAS {{ truenas_update_version }} -> {{ _truenas_update_now }}; pools healthy; services back: {{ truenas_update_services | join(', ') }}."
+          - "Ways back: boot environment {{ truenas_update_active_be }} (kept), config {{ truenas_update_config_file }},
+            snapshots @preupdate-{{ _truenas_update_stamp }} on {{ truenas_update_data_pools | join(', ') }}."
+          - "Now: redo the netdata Graphite step (monitoring's RUNBOOK, TrueNAS setup), since an update resets it,
+            and run mise run truenas:play playbooks/site.yml --check --diff (expect no changes)."
+      vars:
+        _truenas_update_now: "{{ _truenas_update_after.results[0].stdout | trim }}"

@@ -1,0 +1,63 @@
+---
+# The Proxmox host itself, only with -e update_reboot_pve=true: every guest
+# goes down with it. Refuses when a running guest would not come back by
+# itself (no start at boot), then waits until every guest that was running
+# runs again. The guests' own health is their repos' to check (mise run
+# update there); this file only gets them started.
+- name: List the guests running now
+  ansible.builtin.script:
+    cmd: "host_facts.py {{ {'guests_only': true} | to_json | b64encode }}"
+    executable: python3
+  register: _update_pve_before
+  changed_when: false
+
+- name: Keep the running guests
+  ansible.builtin.set_fact:
+    update_pve_running: >-
+      {{ (_update_pve_before.stdout | from_json).proxmox_guests
+         | selectattr('status', 'eq', 'running') | list }}
+
+- name: Read each running guest's start-at-boot setting
+  ansible.builtin.command:
+    argv: [pvesh, get, "/nodes/{{ item.node }}/{{ item.type }}/{{ item.vmid }}/config", --output-format, json]
+  loop: "{{ update_pve_running }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.vmid }})"
+  register: _update_pve_configs
+  changed_when: false
+
+- name: Refuse when a running guest would stay down after the reboot
+  ansible.builtin.assert:
+    that: _update_pve_no_onboot | length == 0
+    fail_msg: >-
+      {{ _update_pve_no_onboot | join(', ') }} run now but do not start at boot,
+      so they would stay down after the reboot. Turn start at boot on (base-vm's
+      start_at_node_boot, or the guest's Options in Proxmox), or stop them first.
+    quiet: true
+  vars:
+    # A filter chain, not a {% for %} block: that renders to a string, whose
+    # length counts characters. pvesh prints compact JSON ("onboot":1).
+    _update_pve_no_onboot: >-
+      {{ _update_pve_configs.results | rejectattr('stdout', 'search', '"onboot": *"?1')
+         | map(attribute='item.name') | list }}
+
+- name: Reboot the Proxmox host
+  ansible.builtin.reboot:
+    msg: "Rebooting after the homelab update procedure"
+    reboot_timeout: 1200
+    test_command: pvesh get /version
+
+- name: Wait until every guest that was running runs again
+  ansible.builtin.script:
+    cmd: "host_facts.py {{ {'guests_only': true} | to_json | b64encode }}"
+    executable: python3
+  register: _update_pve_after
+  until: >-
+    _update_pve_after.rc == 0
+    and update_pve_running | map(attribute='vmid')
+        | difference((_update_pve_after.stdout | from_json).proxmox_guests
+                     | selectattr('status', 'eq', 'running') | map(attribute='vmid') | list)
+        | length == 0
+  retries: 40
+  delay: 15
+  changed_when: false

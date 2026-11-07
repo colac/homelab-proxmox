@@ -1,6 +1,6 @@
 ---
-# The Proxmox node, as root. apply never reboots it, and changes its packages
-# only with -e update_allow_pve=true.
+# The Proxmox node, as root. apply changes its packages only with
+# -e update_allow_pve=true, and reboots it only with -e update_reboot_pve=true.
 ansible_user: root
 update_kind: pve
 update_checks:

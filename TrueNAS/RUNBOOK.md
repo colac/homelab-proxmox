@@ -168,7 +168,9 @@ mise run truenas:play playbooks/20-backup-usb.yml
 ```
 
 Ends with `Backup done; every dataset on backup-usb is encrypted.` Then
-Storage → `backup-usb` → **Export/Disconnect** (keep the data), unplug.
+Storage → `backup-usb` → **Export/Disconnect**, unplug. Tick only **Confirm
+Export/Disconnect**. Leave **Destroy data** and **Delete saved
+configurations** unticked: the second deletes the replication task.
 
 ### A9. Restore test (once — the backup is not proven until this works)
 
@@ -186,6 +188,8 @@ Storage → `backup-usb` → **Export/Disconnect** (keep the data), unplug.
   away.
 - **After a UI-only change** (network, certificates, alerts): a new config
   export into the password manager.
+- **Updates:** `mise run truenas:update` says whether one is out, and
+  `truenas:update:apply` installs it with a way back ([D](#d-updates)).
 
 ## B. Rebuild TrueNAS from scratch
 
@@ -278,3 +282,52 @@ Only when `hdd-home-1` itself is lost (both mirror disks, or the pool).
 
 Data written after the last backup run is not on the disk; the more often the
 weekly routine runs, the less that is.
+
+## D. Updates
+
+`playbooks/30-update.yml`, through TrueNAS's API, the same way the other
+playbooks work: no sudo, no secrets.
+
+```bash
+mise run truenas:update            # report: version, pending update and its notes, boot environments, pools, jobs
+mise run truenas:update:backup     # the three backups below, nothing else
+mise run truenas:update:apply      # backups, then install, reboot and verify
+```
+
+Apply refuses while a pool is unhealthy, scrubbing or resilvering, or while
+any job runs (a USB backup, say). Then:
+
+1. **Config:** `config.save` with the secret seed and the admin's SSH keys
+   goes to `~/.local/share/homelab/truenas-config/` on the laptop. That folder
+   is readable by you only, outside every repo and synced folder. The newest
+   five are kept. The pool keys stay out of it.
+2. **Data:** a recursive `preupdate-<date>-<time>` snapshot of every pool
+   except `backup-usb` (`truenas_update_skip_pools`). The newest two runs are
+   kept. They are not `auto-*`, so neither the periodic task nor the USB
+   replication touches them.
+3. **OS:** the running boot environment is kept from TrueNAS's automatic
+   cleanup.
+4. **Update:** `update.run` installs into a new boot environment. The playbook
+   polls the job rather than holding one long call open, then reboots. It
+   waits for a new boot and for every service that ran before (SMB, SSH), and
+   checks the version and the pools. Only the environment to go back to stays
+   kept.
+
+SMB is down for the reboot, roughly 5–10 minutes, and with it Nextcloud's
+external storage on the NAS. Check that storage in Nextcloud afterwards.
+
+**After an update:**
+
+- Redo the netdata Graphite step from monitoring's RUNBOOK (TrueNAS setup),
+  because an update resets `/etc/netdata/netdata.conf`.
+- Run `mise run truenas:play playbooks/site.yml --check --diff`, which should
+  report no changes.
+
+### Going back
+
+| What broke | Way back |
+|---|---|
+| The new version misbehaves | System → Boot → the previous environment → **Activate**, then reboot. Or `midclt call boot.environment.activate '{"id": "25.10.7"}'` and `midclt call system.reboot "rollback"`. The config inside that environment comes back with it |
+| Files changed or deleted after the update | Copy them back from `/mnt/hdd-home-1/media/.zfs/snapshot/preupdate-…/` |
+| A whole dataset must go back | `midclt call pool.snapshot.rollback 'hdd-home-1/media@preupdate-…'`. This **destroys** everything written since, so prefer copying files. Never roll back `.system` |
+| The boot device is lost | Reinstall (B1), then System → General → Manage Configuration → **Upload Config** with the newest tar from the laptop |
