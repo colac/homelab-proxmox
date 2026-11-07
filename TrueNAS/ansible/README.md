@@ -65,7 +65,10 @@ plugged in for a run:
 3. Storage → `backup-usb` → Export/Disconnect; unplug. Tick only **Confirm
    Export/Disconnect**. Leave **Destroy data** and **Delete saved
    configurations** unticked: the second deletes the replication task
-   `media-to-backup-usb`.
+   `media-to-backup-usb`. The export disables the task instead, and the next
+   import enables it again. While the disk is away, `site.yml --check`
+   reports `enabled: false → true` for it. That is expected, so don't apply
+   it.
 
 The replication task has `auto: false`: with the disk away most of the time,
 a scheduled run would fail and alert daily. Source snapshots are kept 8 weeks,

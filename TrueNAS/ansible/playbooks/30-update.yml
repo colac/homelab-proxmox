@@ -347,6 +347,7 @@
           - "Ways back: boot environment {{ truenas_update_active_be }} (kept), config {{ truenas_update_config_file }},
             snapshots @preupdate-{{ _truenas_update_stamp }} on {{ truenas_update_data_pools | join(', ') }}."
           - "Now: redo the netdata Graphite step (monitoring's RUNBOOK, TrueNAS setup), since an update resets it,
-            and run mise run truenas:play playbooks/site.yml --check --diff (expect no changes)."
+            and run mise run truenas:play playbooks/site.yml --check --diff (expect no changes, except
+            media-to-backup-usb enabled false -> true while the USB disk is exported)."
       vars:
         _truenas_update_now: "{{ _truenas_update_after.results[0].stdout | trim }}"

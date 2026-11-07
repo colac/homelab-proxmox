@@ -320,8 +320,9 @@ external storage on the NAS. Check that storage in Nextcloud afterwards.
 
 - Redo the netdata Graphite step from monitoring's RUNBOOK (TrueNAS setup),
   because an update resets `/etc/netdata/netdata.conf`.
-- Run `mise run truenas:play playbooks/site.yml --check --diff`, which should
-  report no changes.
+- Run `mise run truenas:play playbooks/site.yml --check --diff`. It should
+  report no changes, except `enabled: false → true` on `media-to-backup-usb`
+  while the USB disk is exported (expected; see `ansible/README.md`).
 
 ### Going back
 
