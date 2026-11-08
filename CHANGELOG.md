@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/colac/homelab-proxmox/compare/v2.3.0...v2.4.0) (2026-11-08)
+
+
+### Features
+
+* **update:** reboot the Proxmox host; add TrueNAS updates and update skills ([e531437](https://github.com/colac/homelab-proxmox/commit/e5314378af30b78fa5c66b748a989bf991c4deec))
+
 # [2.3.0](https://github.com/colac/homelab-proxmox/compare/v2.2.3...v2.3.0) (2026-10-28)
 
 
