@@ -11,6 +11,7 @@
   ansible.builtin.set_fact:
     update_todo_apt: "{{ 'apt' in update_host_plan.actions and (update_kind != 'pve' or update_allow_pve | bool) }}"
     update_todo_reboot: "{{ update_reboot | bool and update_kind != 'pve' and 'reboot' in update_host_plan.actions }}"
+    update_todo_reboot_pve: "{{ update_reboot_pve | bool and update_kind == 'pve' and 'reboot' in update_host_plan.actions }}"
     update_todo_components: >-
       {{ update_components | selectattr('hosts', 'contains', inventory_hostname) | selectattr('apply_role', 'defined')
          | selectattr('name', 'in', update_host_plan.actions | select('match', '^component:')
@@ -21,7 +22,8 @@
   ansible.builtin.meta: end_host
   when: >-
     not update_host_plan.reachable
-    or not (update_todo_apt | bool or update_todo_reboot | bool or update_todo_components | length > 0)
+    or not (update_todo_apt | bool or update_todo_reboot | bool or update_todo_reboot_pve | bool
+            or update_todo_components | length > 0)
 
 - name: Refuse to change a host that is already unhealthy
   ansible.builtin.assert:
@@ -64,6 +66,10 @@
 - name: Reboot if the update needs it
   ansible.builtin.include_tasks: reboot.yml
   when: update_todo_reboot | bool
+
+- name: Reboot the Proxmox host if it needs it and that was asked for
+  ansible.builtin.include_tasks: reboot_pve.yml
+  when: update_todo_reboot_pve | bool
 
 - name: Wait until the host is healthy again
   ansible.builtin.include_tasks: health.yml

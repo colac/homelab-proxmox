@@ -11,9 +11,21 @@ split on purpose ([ARCHITECTURE.md](ARCHITECTURE.md)).
 | core | `mise run update` | The Proxmox host and the Pi-hole container (`dns/`) |
 | monitoring | `mise run update` | The monitoring VM: Elastic Stack, its Elastic Agent, the exporters |
 | workloads | `mise run update <app>` (`nextcloud`) | The app's VM: Nextcloud AIO, Caddy |
+| core | `mise run truenas:update` | TrueNAS: its own API, not this playbook ([TrueNAS/RUNBOOK.md § D](../TrueNAS/RUNBOOK.md#d-updates)) |
 
-TrueNAS is outside the procedure for now. Its updates go through its own UI
-and are planned separately (`TrueNAS/`).
+TrueNAS has its own procedure (`TrueNAS/ansible/playbooks/30-update.yml`),
+because it is an appliance updated through its API rather than apt. It follows
+the same pattern:
+
+- a report that changes nothing;
+- apply refuses when the NAS is unhealthy or busy;
+- the ways back are taken first: the config with the secret seed on the laptop,
+  a pre-update snapshot of every data pool, and the running boot environment
+  kept;
+- then install, reboot and verify.
+
+The Claude Code skills `homelab-update` (all repos, in order) and
+`truenas-update` (core) run these procedures and watch them.
 
 ## What a run does
 
@@ -49,7 +61,9 @@ first failure:
 4. **Component updates** that the repo applies itself (`apply_role`): today
    `pihole -up` (core) and AIO's own update script (workloads).
 5. **Reboots** only with `-e update_reboot=true`, and only guests that need it.
-   The Proxmox host is never rebooted.
+   The Proxmox host reboots only with `-e update_reboot_pve=true` (core), last,
+   after its guests. It refuses while a running guest does not start at boot,
+   and waits until every guest that was running runs again.
 6. **Waits until healthy**. If the host is not healthy in time, the run stops
    and prints the rollback command (`qm rollback <vmid> <snapshot>`, or
    `pct rollback`, on the Proxmox host). The hosts after it are left untouched.
@@ -61,6 +75,7 @@ Flags (added after the command):
 |---|---|
 | `-e update_reboot=true` | Reboot guests that need it |
 | `-e update_allow_pve=true` | Core: also upgrade the Proxmox host's packages |
+| `-e update_reboot_pve=true` | Core: reboot the Proxmox host when it needs it, after Pi-hole. Every guest restarts with it, so run each repo's `mise run update` afterwards to see their health |
 | `-e '{"update_force": ["Nextcloud AIO"]}'` | Run a component's update even when its version is current |
 | `-e update_snapshot=false` | Skip the snapshot (storage without snapshot support) |
 | `--limit <host>` / `--limit '!<host>'` | One host only / all but one |
@@ -141,6 +156,8 @@ The full contract is in `ansible/roles/update/defaults/main.yml`.
 | `update:apply` on guests, no reboot | Ask first | Allowed, one repo at a time, stop on the first failure |
 | `-e update_reboot=true` | Ask first | Allowed for guests; not on the Proxmox host |
 | `-e update_allow_pve=true` | Ask first | Never: a human runs it |
+| `-e update_reboot_pve=true` | Ask first | Never: a human runs it |
+| `truenas:update:apply` | Ask first | Never: a human runs it |
 | Pin bumps (Elastic, Caddy, exporters) | A pull request | The agent may open the pull request; a human merges and applies |
 | Rollback from a snapshot | A human | A human (the agent only prints the command) |
 

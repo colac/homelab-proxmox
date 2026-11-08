@@ -114,3 +114,10 @@ truenas_replication_tasks:
     allow_from_scratch: false
     readonly: SET
     enabled: true
+
+# ---------------------------------------------------------------------------
+# Updates (playbooks/30-update.yml): every imported pool gets a recursive
+# preupdate-* snapshot before an update, except these. The USB disk holds
+# replicated copies, which its replication task already versions.
+# ---------------------------------------------------------------------------
+truenas_update_skip_pools: [backup-usb]
