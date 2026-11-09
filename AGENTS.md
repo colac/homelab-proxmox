@@ -9,9 +9,11 @@ rules below are the ones that must hold in every session.
 The core layer of a three-repo Proxmox homelab: Packer templates, the
 `base-vm` Terraform module, the `colac.homelab` Ansible collection
 (`common`, `docker_data`) — one platform service, **DNS** (`dns/`: Pi-hole
-in an LXC container), and the **Proxmox host** itself (`proxmox/`: API
-identities, backups) — plus their updates (`updates/`). Apart from those two,
-nothing here touches a running machine. The collection also ships the update
+in an LXC container), the **Proxmox host** itself (`proxmox/`: API
+identities, backups), and the **NAS** (`TrueNAS/`: its configuration and web
+UI certificate through the TrueNAS API, and its own update playbook) — plus
+their updates (`updates/`). Apart from those three, nothing here touches a
+running machine. The collection also ships the update
 procedure every repo runs for its own machines (`colac.homelab.update`).
 Siblings in `~/git-repos/`:
 
@@ -32,6 +34,9 @@ what consumers must do. Elastic and Nextcloud work belongs in those repos.
   resolver; read before touching `dns/`
 - [proxmox/README.md](proxmox/README.md) — the node's roles, users, tokens
   and config backup; every identity there mirrors CREDENTIALS.md
+- [TrueNAS/ansible/README.md](TrueNAS/ansible/README.md) and
+  [TrueNAS/RUNBOOK.md](TrueNAS/RUNBOOK.md) — the NAS's declared configuration,
+  its certificate, rebuild and updates; read before touching `TrueNAS/`
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — mise tasks, conventions,
   releasing and bumping pins
 - [packer/README.md](packer/README.md), [terraform/README.md](terraform/README.md),
@@ -51,9 +56,10 @@ mise run secrets:check                            # missing key names only
 ```
 
 Need credentials — ask the human first: `mise run packer:validate <release>`,
-`mise run packer:build <release>`, and every `mise run dns:*` except
-`dns:inventory`. No credentials, but they reach live machines — ask first
-too: `mise run update`, `mise run update:apply`.
+`mise run packer:build <release>`, every `mise run dns:*` except
+`dns:inventory`, and `mise run truenas:certificate`. No credentials, but they
+reach live machines — ask first too: `mise run update`, `mise run update:apply`,
+and every other `mise run truenas:*` except `truenas:inventory`.
 
 ## Rules
 

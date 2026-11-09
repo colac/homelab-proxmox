@@ -8,7 +8,7 @@ its internals; this is the page that ties them together.
 
 | Layer | Repo | Owns | Changes |
 |---|---|---|---|
-| **core** | [homelab-proxmox](https://github.com/colac/homelab-proxmox) (this) | Packer templates, the `base-vm` Terraform module, the `colac.homelab` Ansible collection (`common`, `docker_data`), **DNS** (Pi-hole, `dns/`), homelab-wide docs, TrueNAS notes | Rarely; everything else depends on it |
+| **core** | [homelab-proxmox](https://github.com/colac/homelab-proxmox) (this) | Packer templates, the `base-vm` Terraform module, the `colac.homelab` Ansible collection (`common`, `docker_data`), **DNS** (Pi-hole, `dns/`), homelab-wide docs, **TrueNAS** (declared through its API, `TrueNAS/`) | Rarely; everything else depends on it |
 | **monitoring** | [homelab-proxmox-monitoring](https://github.com/colac/homelab-proxmox-monitoring) | The monitoring VM: single-node Elasticsearch, Kibana, Fleet Server, exporters — and Elastic Agent enrollment on **every** host | Medium |
 | **workloads** | [homelab-proxmox-workloads](https://github.com/colac/homelab-proxmox-workloads) | The apps, one folder each: Nextcloud (live), k3s (VM only) | Often |
 
@@ -71,7 +71,8 @@ down here. Nothing else may.
 | `colac.homelab` collection | core → every Ansible tree | `requirements.yml`: `…homelab-proxmox.git#/ansible/`, `version: vX.Y.Z` | Release a tag; bump one consumer; `00-bootstrap.yml --check --diff` |
 | Agent targets | core, workloads → monitoring | Host + address (+ connection user) in monitoring's `ansible/inventory/hosts.yml` (group `agents`): Nextcloud (workloads), `pihole-ct` (core) | Add/remove the entry; run `20` and `50` with `--limit` |
 | Nextcloud metrics | workloads → monitoring | `nextcloud_serverinfo_token`, minted on the VM, stored in monitoring's `secrets.yaml` | Re-mint, update monitoring's secret, re-run `45-exporters.yml` |
-| Private DNS names | each layer → core | A records (`nextcloud.<zone>`, `kibana.<zone>`, `pve.<zone>`) in `pihole_local_records`, `dns/ansible/inventory/group_vars/pihole.yml` | A PR to core, then `mise run dns:play playbooks/10-pihole.yml` |
+| Private DNS names | each layer → core | A records (`nextcloud.<zone>`, `kibana.<zone>`, `pve.<zone>`, `truenas.<zone>`) in `pihole_local_records`, `dns/ansible/inventory/group_vars/pihole.yml` | A PR to core, then `mise run dns:play playbooks/10-pihole.yml` |
+| TrueNAS metrics | core → monitoring | `truenas_reporting_exporters` in core's `TrueNAS/ansible/inventory/group_vars/truenas.yml`: Graphite to the monitoring VM's `:9109`, prefix `truenas`, namespace = monitoring's `exporters_truenas_instance` | Change both together; core's `truenas:play playbooks/site.yml`, then monitoring's `99-healthcheck.yml` |
 | Update procedure | core → monitoring, workloads | `colac.homelab.update` (playbook + `update` role). Each repo declares `update_targets`, `update_components`, `update_checks`, and the Proxmox node in `ansible/update/proxmox.yml` (snapshots, as root) — [UPDATES.md](UPDATES.md) | Release core, bump the pin, `mise run update` (report only) in each consumer |
 | Guest ownership | monitoring, workloads → core | Guest names in `update_guests_elsewhere` (`updates/inventory/group_vars/all.yml`); any other guest is UNTRACKED in core's report | Add or remove the name in the same change that adds or removes the VM |
 | Toolchain pins | core → all | Same versions in every `mise.toml` (Terraform 1.15.7, ansible-core 2.17.14, …) | Bump in core first, then the others |
@@ -103,7 +104,7 @@ flowchart TB
   nc -- "agent → Fleet :8220" --> mon
   nas -- "Graphite :9109" --> mon
   mon -- "serverinfo API via Caddy" --> nc
-  nc & mon -- "DNS-01" --> cf
+  nc & mon & nas -- "DNS-01" --> cf
   cf --- internet
   off -- "Tailscale subnet route<br/>+ split-DNS to Pi-hole" --> nc
   router -. "DNS server 1" .-> pihole

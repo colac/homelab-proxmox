@@ -1,0 +1,141 @@
+---
+# The web UI's certificate: Let's Encrypt for truenas.<zone>, issued by
+# TrueNAS itself through DNS-01 at Cloudflare, then set as the UI's
+# certificate with http:// redirected to https://. TrueNAS renews it daily
+# from truenas_certificate_renew_days before expiry; nothing here runs again
+# for that.
+#
+#   mise run truenas:certificate --check --diff
+#   mise run truenas:certificate
+#   mise run truenas:certificate -e truenas_acme_rotate_token=true   # a new token
+#
+# Needs TrueNAS/secrets.yaml (dns_zone, cloudflare_dns_api_token) through
+# .mise/sops-exec, and Pi-hole's `truenas` record for browsers to find the name.
+- name: TrueNAS's certificate
+  hosts: truenas
+  gather_facts: false
+  vars:
+    truenas_acme_rotate_token: false
+    _truenas_csr_name: "{{ truenas_certificate_name }}-csr"
+    _truenas_authenticator_name: cloudflare
+  tasks:
+    - name: Fail without the zone or the token
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'DNS_ZONE') | length > 0
+          - truenas_acme_dns_token | length > 0
+        fail_msg: >-
+          DNS_ZONE or CLOUDFLARE_DNS_API_TOKEN is empty. Run this through
+          `mise run truenas:certificate`, which reads TrueNAS/secrets.yaml.
+        quiet: true
+
+    # The token is sent on create only: TrueNAS never shows it back, so it
+    # cannot be compared. Rotate with -e truenas_acme_rotate_token=true.
+    - name: Cloudflare DNS authenticator
+      truenas_object:
+        namespace: acme.dns.authenticator
+        filters: [[name, "=", "{{ _truenas_authenticator_name }}"]]
+        data: {name: "{{ _truenas_authenticator_name }}"}
+        secret_data:
+          attributes: {authenticator: cloudflare, api_token: "{{ truenas_acme_dns_token }}"}
+
+    - name: Look up the authenticator
+      ansible.builtin.command:
+        cmd: "midclt call acme.dns.authenticator.query {{ [['name', '=', _truenas_authenticator_name]] | to_json | quote }}"
+      register: _truenas_authenticator
+      changed_when: false
+      check_mode: false
+
+    - name: Give the authenticator the new token
+      ansible.builtin.command:
+        argv:
+          - midclt
+          - call
+          - acme.dns.authenticator.update
+          - "{{ (_truenas_authenticator.stdout | from_json)[0].id }}"
+          - "{{ {'attributes': {'authenticator': 'cloudflare', 'api_token': truenas_acme_dns_token}} | to_json }}"
+      when: truenas_acme_rotate_token | bool and (_truenas_authenticator.stdout | from_json) | length == 1
+      changed_when: true
+      no_log: true
+
+    # The key and the signing request. Renewals reuse them, so they are
+    # created once; a new name means deleting both certificates in the UI
+    # (Credentials → Certificates) and running this again.
+    - name: Certificate signing request
+      truenas_object:
+        namespace: certificate
+        filters: [[name, "=", "{{ _truenas_csr_name }}"]]
+        data:
+          name: "{{ _truenas_csr_name }}"
+          create_type: CERTIFICATE_CREATE_CSR
+          key_type: EC
+          ec_curve: SECP384R1
+          digest_algorithm: SHA256
+          common: "{{ truenas_certificate_fqdn }}"
+          san: ["{{ truenas_certificate_fqdn }}"]
+        create_only: [create_type, key_type, ec_curve, digest_algorithm, common, san]
+        job: true
+
+    # Ids go by name through `refs`: Ansible renders a template that yields a
+    # number as a string, and TrueNAS's API refuses a string id. dns_mapping
+    # is a dict, which Ansible keeps typed.
+    - name: Let's Encrypt certificate
+      truenas_object:
+        namespace: certificate
+        filters: [[name, "=", "{{ truenas_certificate_name }}"]]
+        data:
+          name: "{{ truenas_certificate_name }}"
+          create_type: CERTIFICATE_CREATE_ACME
+          tos: true
+          acme_directory_uri: "{{ truenas_acme_directory }}"
+          csr_id: "{{ _truenas_csr_name }}"
+          dns_mapping: "{{ {truenas_certificate_fqdn: (_truenas_authenticator.stdout | from_json | map(attribute='id') | list + [none]) | first} }}"
+          renew_days: "{{ truenas_certificate_renew_days }}"
+        refs:
+          - {key: csr_id, namespace: certificate, match: name}
+        create_only: [create_type, tos, acme_directory_uri, csr_id, dns_mapping]
+        job: true
+
+    # The UI restarts 5 seconds after the change, dropping open browser
+    # sessions. Ansible's SSH connection is unaffected.
+    - name: Serve the web UI with it
+      truenas_object:
+        namespace: system.general
+        singleton: true
+        data:
+          ui_certificate: "{{ truenas_certificate_name }}"
+          ui_httpsredirect: "{{ truenas_ui_https_redirect }}"
+        refs:
+          - {key: ui_certificate, namespace: certificate, match: name}
+        update_extra: {ui_restart_delay: 5}
+      register: _truenas_ui
+
+    # Checked on the NAS against its own name, with normal certificate
+    # verification, so neither Pi-hole's record nor the laptop is involved.
+    - name: Wait until the UI serves the certificate
+      ansible.builtin.command:
+        argv:
+          - curl
+          - --silent
+          - --output
+          - /dev/null
+          - --write-out
+          - "%{http_code}"
+          - --max-time
+          - "10"
+          - --resolve
+          - "{{ truenas_certificate_fqdn }}:443:127.0.0.1"
+          - "https://{{ truenas_certificate_fqdn }}/ui/"
+      register: _truenas_https
+      until: _truenas_https.rc == 0 and _truenas_https.stdout == '200'
+      retries: 12
+      delay: 5
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Done
+      ansible.builtin.debug:
+        msg: >-
+          https://{{ truenas_certificate_fqdn }} serves Let's Encrypt's certificate
+          (renewed by TrueNAS {{ truenas_certificate_renew_days }} days before expiry).
+      when: not ansible_check_mode

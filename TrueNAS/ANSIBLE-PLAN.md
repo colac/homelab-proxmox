@@ -65,9 +65,11 @@ copy — record that in `docs/CREDENTIALS.md`.
 
 ## Manual settings to document (config-database only)
 
-Network, hostname, certificates, API keys, alert settings and mail, SMART and
-scrub schedules, NTP and timezone, UPS, installed apps. Plus the one-time
-export rules below.
+Since 2026-11-08 the playbooks also declare hostname and DNS servers,
+timezone, NTP, SSH, SMB, services at boot, the scrub schedule, the metrics
+exporter, and the UI's certificate (`40-certificate.yml`). Still manual
+(RUNBOOK B2): network interfaces, mail (Gmail sign-in) and alerts, 2FA, API
+keys, UPS, installed apps. Plus the one-time export rules below.
 
 ## Config export
 

@@ -198,7 +198,8 @@ For a dead boot NVMe, a replacement NAS, or a clean reinstall. The data pool
 after B4).
 
 What you need: TrueNAS installer USB, the password manager (encryption key of
-`backup-usb`, config export), `~/.ssh/truenas_admin.pub`.
+`backup-usb`, config export), `~/.ssh/truenas_admin.pub`, and the age key
+(`TrueNAS/secrets.yaml`, for the certificate).
 
 ### B1. Install
 
@@ -207,20 +208,19 @@ Same major version (25.10.x) or newer.
 
 ### B2. Manual settings (UI)
 
-The ones Ansible does not manage. Exact values: the last
-`~/truenas-discovery.json` (`network`, `interfaces`, `general`, `services`,
-`smb_config`, `nfs_config`, `scrub_tasks`, `smart_tests` — an `error`
-there means that method does not exist in this version; read the UI instead).
+Only what Ansible cannot do: reach the NAS, and the settings that hold
+credentials. Hostname, DNS servers, timezone, NTP, SSH and SMB settings,
+services, the scrub schedule and the metrics exporter are declared, and B4
+puts them back.
 
-1. **Network:** hostname, static `192.168.1.214` (or DHCP reservation),
-   gateway `192.168.1.1`, DNS → the Pi-hole.
-2. **Timezone / NTP** (System → General).
-3. **SSH for Ansible:** Credentials → Users → `truenas_admin` → paste
+1. **Network interfaces:** DHCP, with the router's reservation for
+   `192.168.1.214` (the new NIC's MAC address).
+2. **SSH for Ansible:** Credentials → Users → `truenas_admin` → paste
    `~/.ssh/truenas_admin.pub` as its key; System → Services → **SSH**: enable,
    start automatically.
-4. **Services:** SMB and NFS enabled and set to start automatically, with the
-   settings from `smb_config` / `nfs_config`.
-5. **Scrub and SMART tasks**, alert email.
+3. **Mail and alerts:** System → General → Email (Gmail sign-in), then the
+   E-Mail alert service; send a test.
+4. **Two-factor login**, if it was on (Credentials → 2FA).
 
 ### B3. Import the data pool
 
@@ -234,8 +234,11 @@ ssh -i ~/.ssh/truenas_admin truenas_admin@192.168.1.214 midclt call system.versi
 mise run truenas:play playbooks/site.yml --check --diff
 ```
 
-Expect **create** for groups, users, shares and both backup tasks, and **no
-change** for datasets (they came back with the pool). Then apply:
+Expect **create** for groups, users, shares, both backup tasks and the
+metrics exporter; **update** for the settings that differ from a fresh
+install (timezone, usage statistics, SSH password login, SMB, services); and
+**no change** for datasets (they
+came back with the pool). Then apply:
 
 ```bash
 mise run truenas:play playbooks/site.yml
@@ -243,6 +246,16 @@ mise run truenas:play playbooks/site.yml --check --diff   # all "ok"
 ```
 
 Users come back with **their old UIDs**, so they own their files again.
+
+Then the web UI's certificate, and the metrics file that is not an API
+setting:
+
+```bash
+mise run truenas:certificate        # Let's Encrypt for truenas.<zone>; needs TrueNAS/secrets.yaml
+```
+
+Monitoring's RUNBOOK 4a (netdata's config) restores the NAS metrics in
+Kibana.
 
 ### B5. User passwords
 
@@ -322,7 +335,8 @@ external storage on the NAS. Check that storage in Nextcloud afterwards.
   because an update resets `/etc/netdata/netdata.conf`.
 - Run `mise run truenas:play playbooks/site.yml --check --diff`. It should
   report no changes, except `enabled: false → true` on `media-to-backup-usb`
-  while the USB disk is exported (expected; see `ansible/README.md`).
+  while the USB disk is exported (expected and harmless; see
+  `ansible/README.md`).
 
 ### Going back
 

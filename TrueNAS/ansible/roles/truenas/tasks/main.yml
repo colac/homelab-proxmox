@@ -97,3 +97,55 @@
   loop: "{{ truenas_replication_tasks }}"
   loop_control:
     label: "{{ item.name }}"
+
+# The settings objects (SSH, SMB, network, general): one each, so no query
+# filter. Only the fields declared are compared and sent.
+- name: Settings
+  truenas_object:
+    namespace: "{{ item.key }}"
+    singleton: true
+    data: "{{ item.value }}"
+  loop: "{{ truenas_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Services started at boot
+  truenas_object:
+    namespace: service
+    filters: [[service, "=", "{{ item.key }}"]]
+    data: "{{ {'enable': item.value} }}"
+  loop: "{{ truenas_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}: {{ 'on' if item.value else 'off' }}"
+
+- name: NTP servers
+  truenas_object:
+    namespace: system.ntpserver
+    filters: [[address, "=", "{{ item.address }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_ntp_servers }}"
+  loop_control:
+    label: "{{ item.address }}"
+
+- name: Scrub tasks
+  truenas_object:
+    namespace: pool.scrub
+    filters: [[pool_name, "=", "{{ item.pool }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    refs:
+      - {key: pool, namespace: pool, match: name}
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_scrub_tasks }}"
+  loop_control:
+    label: "{{ item.pool }}"
+
+- name: Reporting exporters
+  truenas_object:
+    namespace: reporting.exporters
+    filters: [[name, "=", "{{ item.name }}"]]
+    data: "{{ item | dict2items | rejectattr('key', 'in', truenas_control_keys) | items2dict }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ truenas_reporting_exporters }}"
+  loop_control:
+    label: "{{ item.name }}"

@@ -84,6 +84,6 @@ mise run packer:build 26.04                    # build a template (credentials, 
 | `updates/` | The update procedure for core's machines (Proxmox host, Pi-hole): `mise run update` |
 | `docs/` | Homelab-wide: architecture, credentials, development, updates |
 | `scripts/` | Standalone ops helpers (disk vetting); not pipeline |
-| `TrueNAS/` | NAS install notes, runbook (adopt, rebuild, restore), and `ansible/`: users, shares, snapshot and USB backup tasks through its API |
+| `TrueNAS/` | NAS install notes, runbook (adopt, rebuild, restore), and `ansible/`: users, shares, snapshot and USB backup tasks, system settings and the metrics exporter through its API, and the web UI's Let's Encrypt certificate |
 | `.mise/sops-exec`, `mise.toml` | Per-command secrets and every entry point |
 | `secrets.yaml` (+ `.example`) | Template-build credentials, SOPS-encrypted, committed as ciphertext |

@@ -4,8 +4,8 @@
 # how each list is identified and what is immutable.
 #
 # Managed here means: change it HERE, not in the UI, or the next run puts it
-# back. Pools, network, certificates and other one-time settings are manual
-# (TrueNAS/README.md).
+# back. Pools, network interfaces, mail and alerts stay manual (RUNBOOK.md B2);
+# the web UI's certificate is playbooks/40-certificate.yml (needs secrets).
 
 # ---------------------------------------------------------------------------
 # Groups and users — from the live system (discovery, 2026-10-16). UIDs and
@@ -114,6 +114,97 @@ truenas_replication_tasks:
     allow_from_scratch: false
     readonly: SET
     enabled: true
+
+# ---------------------------------------------------------------------------
+# System settings and services — from the live system (2026-11-08), so a
+# reinstall comes back the same. Each key is an API namespace; only the fields
+# listed are managed.
+# ---------------------------------------------------------------------------
+truenas_settings:
+  network.configuration:
+    hostname: truenas
+    domain: local
+    nameserver1: 192.168.1.153     # the Pi-hole container (core dns/)
+    nameserver2: 192.168.1.1       # the router, while the Pi-hole is down
+  system.general:
+    timezone: Europe/Lisbon
+    kbdmap: pt
+    # No usage statistics to iXsystems.
+    usage_collection: false
+  ssh:
+    # Keys only. If the key is unavailable, the web UI's shell still works.
+    passwordauth: false
+    tcpfwd: false
+  smb:
+    netbiosname: truenas
+    workgroup: WORKGROUP
+    description: TrueNAS Server
+    enable_smb1: false
+    aapl_extensions: false
+    multichannel: false
+
+# Started at boot. SSH must be: Ansible and the update procedure log in with it.
+truenas_services:
+  cifs: true
+  ssh: true
+  nfs: false
+  ftp: false
+  iscsitarget: false
+  nvmet: false
+  snmp: false
+  ups: false
+
+truenas_ntp_servers:
+  - {address: 0.debian.pool.ntp.org, iburst: true}
+  - {address: 1.debian.pool.ntp.org, iburst: true}
+  - {address: 2.debian.pool.ntp.org, iburst: true}
+
+# TrueNAS creates one when a pool is created or imported; declared so a
+# reinstall keeps the schedule. backup-usb's comes and goes with its import.
+truenas_scrub_tasks:
+  - pool: hdd-home-1
+    threshold: 35
+    schedule: {minute: "00", hour: "00", dom: "*", month: "*", dow: "7"}
+    enabled: true
+
+# Metrics for monitoring's Elastic Stack: netdata pushes Graphite to the
+# graphite-exporter on the monitoring VM. A contract with that repo:
+# - destination: the monitoring VM (its inventory), graphite-exporter's
+#   ingest port 9109;
+# - prefix `truenas`: its mapping file keys off it;
+# - namespace: its `exporters_truenas_instance`, the instance label;
+# - update_every: its `exporters_scrape_period` (60s).
+# netdata's own config (/etc/netdata/netdata.conf) is a file, not an API
+# setting: monitoring's RUNBOOK 4a, redone after each TrueNAS update.
+truenas_reporting_exporters:
+  - name: monitoring
+    enabled: true
+    attributes:
+      exporter_type: GRAPHITE
+      destination_ip: 192.168.1.87
+      destination_port: 9109
+      prefix: truenas
+      namespace: truenas
+      update_every: 60
+      send_names_instead_of_ids: true
+
+# ---------------------------------------------------------------------------
+# The web UI's certificate (playbooks/40-certificate.yml): Let's Encrypt for
+# truenas.<zone> through DNS-01 at Cloudflare, so nothing is exposed.
+# TrueNAS renews it by itself. The zone and the token come from
+# TrueNAS/secrets.yaml (`mise run truenas:certificate`), so the real domain
+# never appears in this repo. Pi-hole's `truenas` record points the name here.
+# ---------------------------------------------------------------------------
+truenas_certificate_name: truenas
+truenas_certificate_fqdn: "truenas.{{ lookup('env', 'DNS_ZONE') }}"
+truenas_acme_dns_token: "{{ lookup('env', 'CLOUDFLARE_DNS_API_TOKEN') }}"
+truenas_acme_directory: https://acme-v02.api.letsencrypt.org/directory
+# Days before expiry that TrueNAS renews (its maximum; Let's Encrypt certs
+# last 90 days).
+truenas_certificate_renew_days: 30
+# http:// → https://. 30-update.yml downloads from the middleware's own port,
+# so the redirect does not affect it.
+truenas_ui_https_redirect: true
 
 # ---------------------------------------------------------------------------
 # Updates (playbooks/30-update.yml): every imported pool gets a recursive

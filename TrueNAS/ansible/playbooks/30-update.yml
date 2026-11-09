@@ -117,12 +117,12 @@
       delegate_to: localhost
 
     # config.save writes to a download stream, and core.download returns its
-    # one-time URL. TrueNAS fetches that from itself on 127.0.0.1 (plain HTTP
-    # never leaves the machine), and the file reaches the laptop over the same
-    # SSH as everything else. The secret seed decrypts the stored credentials,
-    # which a reinstall needs, and the root SSH keys come along. Pool keys stay
-    # out: the USB disk's key lives in the password manager, not next to its
-    # backup.
+    # one-time URL. TrueNAS fetches that from its middleware on 127.0.0.1:6000,
+    # past the web server and its https redirect (plain HTTP never leaves the
+    # machine), and the file reaches the laptop over the same SSH as everything
+    # else. The secret seed decrypts the stored credentials, which a reinstall
+    # needs, and the root SSH keys come along. Pool keys stay out: the USB
+    # disk's key lives in the password manager, not next to its backup.
     - name: Back up the config
       block:
         - name: Make a private temporary file on TrueNAS
@@ -149,7 +149,7 @@
               - "120"
               - --output
               - "{{ _truenas_update_tmp.path }}"
-              - "http://127.0.0.1{{ (_truenas_update_download.stdout | from_json)[1] }}"
+              - "http://127.0.0.1:6000{{ (_truenas_update_download.stdout | from_json)[1] }}"
           changed_when: false
 
         - name: Copy it to the laptop over SSH

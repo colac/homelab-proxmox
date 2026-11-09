@@ -1,9 +1,12 @@
 # TrueNAS — declared configuration
 
-Users, groups, datasets, SMB/NFS shares, periodic snapshot tasks and the USB
-backup's replication task, declared in
+Users, groups, datasets, SMB/NFS shares, periodic snapshot tasks, the USB
+backup's replication task, and the system settings a reinstall would lose
+(network names and DNS, timezone, SSH, SMB, services at boot, NTP, the scrub
+schedule, the metrics exporter for monitoring), declared in
 [`inventory/group_vars/truenas.yml`](inventory/group_vars/truenas.yml) and
-applied through TrueNAS's own API. The plan and its reasoning are in
+applied through TrueNAS's own API. The web UI's Let's Encrypt certificate has
+its own playbook, because it needs secrets. The plan and its reasoning are in
 [`../ANSIBLE-PLAN.md`](../ANSIBLE-PLAN.md); the step-by-step order — adopting
 the live NAS, rebuilding it, restoring the data — is
 [`../RUNBOOK.md`](../RUNBOOK.md).
@@ -18,6 +21,7 @@ mise run truenas:play playbooks/site.yml --check --diff   # what would change
 mise run truenas:play playbooks/site.yml                  # apply
 mise run truenas:play playbooks/20-backup-usb.yml         # back up to the USB disk now
 mise run truenas:play playbooks/90-selftest.yml           # prove the module on throwaway objects
+mise run truenas:certificate --check --diff               # the UI's certificate (TrueNAS/secrets.yaml)
 ```
 
 No sudo and no password: TrueNAS runs a local `midclt` call with the calling
@@ -36,6 +40,12 @@ TrueNAS and calls `midclt`, the middleware client:
    change.
 3. `state: absent` → `<namespace>.delete`.
 
+Settings objects (`ssh`, `smb`, `system.general`, `network.configuration`)
+have no id and no create: the module reads `<namespace>.config` and calls
+`<namespace>.update` with the declared fields that differ
+(`singleton: true`). Methods that run as jobs (`certificate`) are waited for
+(`job: true`).
+
 Each item in `group_vars` uses **the API's own field names** (v25.10,
 <https://api.truenas.com/v25.10/>), so the API reference is the documentation
 for every field. The module adds four things:
@@ -45,7 +55,7 @@ for every field. The module adds four things:
 | `uid` and `gid` are **immutable**: a mismatch fails the run | Pool files are owned by number; re-numbering a user locks them out of their files |
 | Deleting a **dataset** also needs `allow_delete: true` | It deletes the data |
 | Passwords are only ever sent on **create**, and never shown | Changing a password is done in the UI (or a new `password_env`) |
-| A user's `group`/`groups` and a replication's `periodic_snapshot_tasks` are written as **names** | The module resolves them to API ids |
+| A user's `group`/`groups`, a replication's `periodic_snapshot_tasks`, a scrub's `pool`, the certificate's `csr_id` and the UI's `ui_certificate` are written as **names** (`refs`) | The module resolves them to API ids. An id templated in YAML would reach the API as a string, which it refuses |
 
 **Managed means code-only.** Anything declared here is changed here, not in
 the UI — the next run would put it back.
@@ -67,13 +77,42 @@ plugged in for a run:
    configurations** unticked: the second deletes the replication task
    `media-to-backup-usb`. The export disables the task instead, and the next
    import enables it again. While the disk is away, `site.yml --check`
-   reports `enabled: false → true` for it. That is expected, so don't apply
-   it.
+   reports `enabled: false → true` for it. That is expected, and applying it
+   is harmless: the task never runs by itself.
 
 The replication task has `auto: false`: with the disk away most of the time,
 a scheduled run would fail and alert daily. Source snapshots are kept 8 weeks,
 so a run after a month away is still incremental; the task never replicates
 "from scratch", which would wipe the backup first.
+
+## The web UI's certificate
+
+`https://truenas.<zone>` with a Let's Encrypt certificate, through DNS-01 at
+Cloudflare, so the NAS stays LAN-only.
+[`playbooks/40-certificate.yml`](playbooks/40-certificate.yml) creates, in
+TrueNAS:
+
+1. A Cloudflare **ACME DNS authenticator** holding the token.
+2. A **signing request**: an EC P-384 key for `truenas.<zone>`.
+3. The **certificate**, ordered from Let's Encrypt.
+4. The **web UI's settings**: that certificate, and http:// redirected to
+   https://. The UI restarts, which drops open browser sessions.
+
+TrueNAS **renews it by itself**: a daily job renews a certificate 30 days
+before it expires (`truenas_certificate_renew_days`) and reloads the UI.
+Nothing here runs again for that.
+
+```bash
+mise run secrets:edit TrueNAS                  # dns_zone, cloudflare_dns_api_token
+mise run truenas:certificate --check --diff
+mise run truenas:certificate
+mise run truenas:certificate -e truenas_acme_rotate_token=true   # after rotating the token
+```
+
+Browsers find the name through Pi-hole's `truenas` record (core's `dns/`).
+The token is this certificate's own ([docs/CREDENTIALS.md](../../docs/CREDENTIALS.md#cloudflare-dns-tokens)).
+TrueNAS stores it and never shows it back, so the play can't compare it: the
+`-e` flag sends it again.
 
 ## Tests
 
@@ -85,4 +124,6 @@ so a run after a month away is still incremental; the task never replicates
   throwaway `ansible-test` objects (UID/GID 39999, dataset
   `hdd-home-1/ansible-test`) and removes them, also on failure.
 - **Every change:** `--check --diff` against the live system must report no
-  changes for anything already in place.
+  changes for anything already in place. Check mode never calls create or
+  update, so it cannot catch a value the API refuses (a string where it wants
+  an integer); only the first real run does.

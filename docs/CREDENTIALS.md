@@ -28,6 +28,7 @@ decrypts one file for one command and passes on only what that tool reads:
 | core | `secrets.yaml` | `packer` → `mise run packer:*` | `PKR_VAR_proxmox_api_*`, `PKR_VAR_password_hash`, `PKR_VAR_ssh_authorized_keys` (from `~/.ssh/homelab-proxmox.pub`), node/TLS flag |
 | core | `secrets.yaml` | `terraform` → `mise run dns:plan`/`dns:apply`/`dns:tf` | `TF_VAR_pm_api_*`, `TF_VAR_pm_tls_insecure`, `TF_TOKEN_app_terraform_io` (if set) |
 | core | `dns/secrets.yaml` | `dns` → `mise run dns:play` | `DNS_ZONE`, `PIHOLE_WEB_PASSWORD` |
+| core | `TrueNAS/secrets.yaml` | `truenas` → `mise run truenas:certificate` | `DNS_ZONE`, `CLOUDFLARE_DNS_API_TOKEN` |
 | monitoring | `secrets.yaml` | `terraform` → `mise run tf…` | `TF_VAR_pm_api_*`, `TF_VAR_pm_tls_insecure`, `TF_TOKEN_app_terraform_io` (if set) |
 | monitoring | `secrets.yaml` | `ansible` → `mise run play` | `ELASTIC_PASSWORD`, `KIBANA_SYSTEM_PASSWORD`, `KIBANA_ENCRYPTION_KEY`, `NEXTCLOUD_DOMAIN`, `ACME_EMAIL`, `CLOUDFLARE_DNS_API_TOKEN`, `NEXTCLOUD_SERVERINFO_TOKEN`, `PVE_EXPORTER_TOKEN_*` |
 | workloads | `secrets.yaml` | `terraform` → `mise run tf <app>` | as monitoring's `terraform` |
@@ -65,7 +66,7 @@ losing it is recoverable by re-running the roles.
 | [Terraform Proxmox tokens](#terraform-proxmox-token) | Proxmox | each repo's `secrets.yaml`: `proxmox_terraform_token_*` | Terraform |
 | [Terraform Cloud token](#terraform-cloud-token) | app.terraform.io | each repo: `tf_cloud_token` (optional) | Terraform state |
 | [Pi-hole admin password](#pi-hole-admin-password) | you choose | core `dns/secrets.yaml`: `pihole_web_password` (+ `dns_zone`) | Pi-hole |
-| [Cloudflare DNS tokens](#cloudflare-dns-tokens) | Cloudflare | monitoring + workloads/nextcloud: `cloudflare_dns_api_token` | Kibana's certbot; Nextcloud's Caddy |
+| [Cloudflare DNS tokens](#cloudflare-dns-tokens) | Cloudflare | monitoring + workloads/nextcloud + core `TrueNAS/secrets.yaml`: `cloudflare_dns_api_token` | Kibana's certbot; Nextcloud's Caddy; TrueNAS's ACME |
 | [Elastic passwords and key](#elastic-passwords-and-encryption-key) | you choose | monitoring: `elastic_password`, `kibana_system_password`, `kibana_encryption_key` | Elastic Stack |
 | [Nextcloud serverinfo token](#nextcloud-serverinfo-token) | Nextcloud VM | monitoring: `nextcloud_serverinfo_token` | metrics exporter |
 | [Proxmox MCP token](#proxmox-mcp-token) | Proxmox | the MCP client's config on your machine (not in a repo) | AI agents reading Proxmox state |
@@ -95,6 +96,8 @@ just kept out of the public repos.
 5. Monitoring: [Elastic](#elastic-passwords-and-encryption-key),
    [Cloudflare](#cloudflare-dns-tokens), then — once Nextcloud runs — the
    [serverinfo token](#nextcloud-serverinfo-token) → deploy monitoring.
+6. Core, TrueNAS: [Cloudflare](#cloudflare-dns-tokens) and `dns_zone` in
+   `TrueNAS/secrets.yaml` → `mise run truenas:certificate`.
 
 ## age key
 
@@ -225,17 +228,20 @@ workloads.
 ## Cloudflare DNS tokens
 
 Let's Encrypt DNS-01 for the private names: Cloudflare only answers the
-challenge TXT record, nothing is exposed. **Two tokens, one per certificate**,
-so rotating one never breaks the other:
+challenge TXT record, nothing is exposed. **One token per certificate**, so
+rotating one never breaks the others:
 
 | Token | Repo / key | Serves |
 |---|---|---|
 | Caddy | workloads `nextcloud/secrets.yaml` → `cloudflare_dns_api_token` | `nextcloud.<zone>` |
 | Kibana certbot | monitoring `secrets.yaml` → `cloudflare_dns_api_token` | `kibana.<zone>` |
+| TrueNAS ACME | core `TrueNAS/secrets.yaml` → `cloudflare_dns_api_token` | `truenas.<zone>` (the web UI) |
 
 Issue: Cloudflare dashboard → My Profile → API Tokens → Create Token → **Edit
 zone DNS** template → Permissions `Zone · DNS · Edit`, Zone Resources
-`Include · Specific zone · <your zone>`. Copy it once.
+`Include · Specific zone · <your zone>`. Copy it once. An account token
+(Manage Account → Account API Tokens, listed with the permission "DNS Write")
+works too and survives your user's removal; TrueNAS's is one.
 
 Rotating, then **prove** the renewal works — Let's Encrypt certs last 90 days
 and both tools start renewing at 30 days left, so a broken token shows up weeks
@@ -251,7 +257,14 @@ ssh ubuntu@<nextcloud-ip> 'sudo docker logs nextcloud-caddy 2>&1 | tail -50'   #
 mise run secrets:edit && mise run secrets:check
 mise run play playbooks/35-kibana.yml                     # rewrites certbot's cloudflare.ini
 ssh ubuntu@<monitoring-ip> 'sudo certbot renew --dry-run'
+
+# TrueNAS (core): it keeps its own copy of the token, so send the new one
+mise run secrets:edit TrueNAS && mise run secrets:check
+mise run truenas:certificate -e truenas_acme_rotate_token=true
 ```
+
+TrueNAS has no dry run: after a rotation, check the next renewal in its UI
+(Credentials → Certificates, the expiry date moves once 30 days are left).
 
 Usual failures: a token scoped to the wrong zone, or `Zone:Read` without
 `DNS:Edit`.
