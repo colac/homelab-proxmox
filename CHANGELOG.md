@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/colac/homelab-proxmox/compare/v2.4.0...v2.5.0) (2026-11-10)
+
+
+### Features
+
+* **truenas:** declare system settings and issue the web UI's certificate ([b8f8d89](https://github.com/colac/homelab-proxmox/commit/b8f8d893ae5b0cbece741baae56aa72b2e9c1f02))
+
 # [2.4.0](https://github.com/colac/homelab-proxmox/compare/v2.3.0...v2.4.0) (2026-11-08)
 
 
