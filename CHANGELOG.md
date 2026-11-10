@@ -1,3 +1,10 @@
+## [2.5.1](https://github.com/colac/homelab-proxmox/compare/v2.5.0...v2.5.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **truenas:** run site.yml when truenas:play is given no playbook ([cfb337e](https://github.com/colac/homelab-proxmox/commit/cfb337e342645e3ef3b929559fbe72c5f29de842))
+
 # [2.5.0](https://github.com/colac/homelab-proxmox/compare/v2.4.0...v2.5.0) (2026-11-10)
 
 
