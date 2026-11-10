@@ -8,8 +8,8 @@ configuration**, so either can answer every query.
 | LXC container `pihole-ct` (ID 103) | **192.168.1.153** | failover | Terraform (`terraform/`) | Ansible (`ansible/`) | **live** since 2026-10-07 — today the only resolver |
 | Raspberry Pi `pihole-pi` | **192.168.1.53** | primary — physical, survives a Proxmox outage | Raspberry Pi Imager | Ansible (`ansible/`) | planned (core's TODO) |
 
-The hand-built Pi-hole that used to hold `.53` is stopped, kept for a week as
-the rollback, then deleted.
+The hand-built Pi-hole that used to hold `.53` has been deleted, so nothing
+answers on `.53` until the Pi takes it.
 
 Both hosts are in the Ansible group `pihole`, so one playbook run gives them
 the same records, upstreams, blocklists and password. Nothing is configured by
@@ -101,9 +101,9 @@ flowchart LR
    servers) or turn IPv6 DNS advertisement off.
 
 **Tailscale split-DNS** (admin console → DNS → the nameserver restricted to
-your zone) must name `192.168.1.153` — while it names the stopped `.53`,
-off-LAN devices cannot resolve `nextcloud.<zone>`. Add `.53` back next to it
-once the Pi exists.
+your zone) must name `192.168.1.153` — if it names only `.53`, where nothing
+answers yet, off-LAN devices cannot resolve `nextcloud.<zone>`. Add `.53` next
+to it once the Pi exists.
 
 ## Verify it
 
@@ -165,11 +165,12 @@ resolver to be down: the container comes up beside whatever already answers.
 
 ## Add the Raspberry Pi (primary, `.53`) — later
 
-Not deployed yet; until then the hand-built Pi-hole keeps `.53`. The plan in
-core's TODO replaces step 1 with cloud-init files kept in this folder and a
-`mise run dns:pi-image` task, so re-imaging never depends on clicking through
-Imager — and gives the Pi a static `.53` without a router reservation. The
-manual path, meanwhile:
+Not deployed yet, and `.53` is free. The plan in core's TODO replaces step 1
+with cloud-init files kept in this folder and a `mise run dns:pi-image` task,
+so re-imaging never depends on clicking through Imager, and gives the Pi a
+static `.53`. That still needs rule 2's reservation (or an exclusion from the
+pool), or the router can lease `.53` to another device. The manual path,
+meanwhile:
 
 1. **Flash it with Raspberry Pi Imager:** Raspberry Pi OS (other) →
    **Raspberry Pi OS Lite (64-bit)**. In OS customisation:
@@ -183,20 +184,22 @@ manual path, meanwhile:
 3. **Inventory:** `cp ansible/inventory/hosts.yml.example ansible/inventory/hosts.yml`
    (git-ignored), set `ansible_user` to your username and `ansible_host` to the
    **temporary** address.
-4. **Configure it while the old Pi-hole still holds `.53`:**
+4. **Configure it on its temporary address:**
 
    ```bash
    mise run dns:inventory                   # pihole-ct and pihole-pi under pihole
    mise run dns:play playbooks/site.yml --limit pihole-pi
    ```
 
-5. **Hand it `.53`** — the container answers as server 2 the whole time, so
-   there is no outage:
-   - stop the hand-built Pi-hole on the node (`pct stop <old-id>`; keep it a
-     week for rollback, then delete it);
+5. **Hand it `.53`** — the container keeps answering the whole time, so there
+   is no outage:
    - on the router, reserve `.53` for the Pi's MAC; reboot the Pi;
    - set `ansible_host: 192.168.1.53` in `hosts.yml`, then
      `mise run dns:play playbooks/99-healthcheck.yml`.
+6. **Point everything at it:** the router's DNS servers ([The router](#the-router)),
+   Tailscale split-DNS (add `.53`), TrueNAS's `nameserver2`, and the
+   monitoring agent (core's TODO lists all of them, plus the update procedure,
+   which does not cover the Pi yet).
 
 ## Operating it
 

@@ -66,7 +66,7 @@ losing it is recoverable by re-running the roles.
 | [Terraform Proxmox tokens](#terraform-proxmox-token) | Proxmox | each repo's `secrets.yaml`: `proxmox_terraform_token_*` | Terraform |
 | [Terraform Cloud token](#terraform-cloud-token) | app.terraform.io | each repo: `tf_cloud_token` (optional) | Terraform state |
 | [Pi-hole admin password](#pi-hole-admin-password) | you choose | core `dns/secrets.yaml`: `pihole_web_password` (+ `dns_zone`) | Pi-hole |
-| [Cloudflare DNS tokens](#cloudflare-dns-tokens) | Cloudflare | monitoring + workloads/nextcloud + core `TrueNAS/secrets.yaml`: `cloudflare_dns_api_token` | Kibana's certbot; Nextcloud's Caddy; TrueNAS's ACME |
+| [Cloudflare DNS tokens](#cloudflare-dns-tokens) | Cloudflare | monitoring + workloads/nextcloud + core `TrueNAS/secrets.yaml`: `cloudflare_dns_api_token`; the Proxmox node's ACME plugin (not in a repo) | Kibana's certbot; Nextcloud's Caddy; TrueNAS's ACME; Proxmox's API certificate |
 | [Elastic passwords and key](#elastic-passwords-and-encryption-key) | you choose | monitoring: `elastic_password`, `kibana_system_password`, `kibana_encryption_key` | Elastic Stack |
 | [Nextcloud serverinfo token](#nextcloud-serverinfo-token) | Nextcloud VM | monitoring: `nextcloud_serverinfo_token` | metrics exporter |
 | [Proxmox MCP token](#proxmox-mcp-token) | Proxmox | the MCP client's config on your machine (not in a repo) | AI agents reading Proxmox state |
@@ -236,6 +236,13 @@ rotating one never breaks the others:
 | Caddy | workloads `nextcloud/secrets.yaml` → `cloudflare_dns_api_token` | `nextcloud.<zone>` |
 | Kibana certbot | monitoring `secrets.yaml` → `cloudflare_dns_api_token` | `kibana.<zone>` |
 | TrueNAS ACME | core `TrueNAS/secrets.yaml` → `cloudflare_dns_api_token` | `truenas.<zone>` (the web UI) |
+| Proxmox ACME | **the node only**, in no repo: Datacenter → ACME → Challenge Plugins → `Cloudflare`, key `CF_Token` (stored in `/etc/pve/priv/acme/plugins.cfg`) | `pve.<zone>` (the web UI and the API) |
+
+Proxmox's is the one that stops everything when it lapses: Packer and
+Terraform verify the API's certificate (`PROXMOX_TLS_INSECURE=false`), so an
+expired one makes every build and plan fail. The node renews it daily from
+`pve-daily-update` once 30 days are left. A failed attempt shows in the node's
+task log as `acmerenew` with `Error add txt for domain:_acme-challenge…`.
 
 Issue: Cloudflare dashboard → My Profile → API Tokens → Create Token → **Edit
 zone DNS** template → Permissions `Zone · DNS · Edit`, Zone Resources
@@ -244,8 +251,8 @@ zone DNS** template → Permissions `Zone · DNS · Edit`, Zone Resources
 works too and survives your user's removal; TrueNAS's is one.
 
 Rotating, then **prove** the renewal works — Let's Encrypt certs last 90 days
-and both tools start renewing at 30 days left, so a broken token shows up weeks
-later as an expired cert:
+and every one of these starts renewing at 30 days left, so a broken token shows
+up weeks later as an expired cert:
 
 ```bash
 # Nextcloud (workloads)
@@ -261,13 +268,21 @@ ssh ubuntu@<monitoring-ip> 'sudo certbot renew --dry-run'
 # TrueNAS (core): it keeps its own copy of the token, so send the new one
 mise run secrets:edit TrueNAS && mise run secrets:check
 mise run truenas:certificate -e truenas_acme_rotate_token=true
+
+# Proxmox (on the node): edit the plugin in the UI and replace CF_Token only.
+# From the shell, `pvenode acme plugin set Cloudflare --data <file>` replaces
+# all four keys (CF_Token, CF_Account_ID, CF_Zone_ID, CF_Email), so the file
+# needs every one of them.
+pvenode acme cert renew                    # once 30 days are left; --force before that
+openssl x509 -in /etc/pve/local/pveproxy-ssl.pem -noout -enddate
 ```
 
 TrueNAS has no dry run: after a rotation, check the next renewal in its UI
 (Credentials → Certificates, the expiry date moves once 30 days are left).
 
 Usual failures: a token scoped to the wrong zone, or `Zone:Read` without
-`DNS:Edit`.
+`DNS:Edit`. Proxmox also fails when its `CF_Zone_ID` is not the zone the
+token covers.
 
 ## Elastic passwords and encryption key
 

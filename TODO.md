@@ -64,9 +64,8 @@ workloads for Nextcloud and k3s.
       leaves `onboot` off, so nextcloud and monitoring stayed stopped from
       2026-10-24 until started by hand (Pi-hole, with `onboot`, came back).
       `base-vm` now sets `start_at_node_boot` (default `true`)
-- [ ] **Roll it out**: bump `?ref=` and `requirements.yml` in monitoring and
-      workloads to the release; each plan should show only
-      `start_at_node_boot` changing in place
+- [x] **Roll it out**: monitoring and workloads pin v2.3.0, and the
+      nextcloud and monitoring VMs have `onboot: 1` (checked 2026-11-10)
 
 ## DNS (homelab-wide)
 
@@ -83,7 +82,8 @@ workloads for Nextcloud and k3s.
 - [ ] **Router:** DHCP reservation for `.153` (`BC:24:11:00:01:53`), and check
       what it advertises as IPv6 DNS. Server 2: not a public resolver (it
       leaks ads and breaks private names at random) — leave it empty or `.153`
-      until the Pi exists, then `.153` with the Pi as server 1
+      until the Pi exists, then `.153` with the Pi as server 1. On 2026-11-10
+      a laptop on the LAN still got `1.1.1.1` as its second DNS server
 - [ ] **Later — add the Raspberry Pi as primary** at `192.168.1.53`
       (Raspberry Pi OS Lite 64-bit, configured by the same playbook). Until
       then DNS goes down with Proxmox. Image it from the repo, not by hand:
@@ -91,11 +91,22 @@ workloads for Nextcloud and k3s.
       `rpi-imager --cli` takes the files (`--cloudinit-userdata`,
       `--cloudinit-networkconfig`). So: tracked `dns/raspberry-pi/user-data`
       (hostname, user, deploy key, no password login over SSH) and
-      `network-config` (**static `.53` on the Pi itself**, so it needs no DHCP
-      reservation), the console password hash in `dns/secrets.yaml`, and a
+      `network-config` (**static `.53` on the Pi itself**; the router's DHCP
+      pool still covers `.53`, so reserve or exclude it there too), the
+      console password hash in `dns/secrets.yaml`, and a
       `mise run dns:pi-image <device>` task that renders them through
       sops-exec and flashes the card. Build it when the Pi is in hand, so it
-      is tested against the real thing
+      is tested against the real thing. Also needed before it joins:
+  - **Updates:** `updates/` cannot update it yet. `updates/ansible.cfg` loads
+    only the generated `pihole.yml`, and `updates/inventory/group_vars/pihole.yml`
+    sets `update_kind: lxc` and `update_proxmox_name: pihole` for the whole
+    group, so a Pi in it would be treated as the container. The `update` role
+    knows only `vm`, `lxc` and `pve`; a physical host needs its own kind (no
+    snapshot, its own reboot)
+  - **Once it answers on `.53`:** router server 1 → `.53`; Tailscale
+    split-DNS adds `.53`; TrueNAS's `nameserver2` (now the router, in
+    `TrueNAS/ansible/inventory/group_vars/truenas.yml`) → `.53`; its agent
+    (monitoring's `docs/rollout-pve-and-pihole.md`, A6)
 - [ ] **Monitor them**: add both to the monitoring repo's agent targets
 - [ ] **Move `home-nas.local` into the zone** (`nas.<zone>`): `.local` is
       mDNS's, and some clients never ask Pi-hole for it
