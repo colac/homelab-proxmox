@@ -44,7 +44,7 @@ and no secrets.
    - run `mise run truenas:play playbooks/site.yml --check --diff`, which
      should report no changes. The exception is `enabled: false → true` on
      `media-to-backup-usb` while the USB disk is exported: the export disabled
-     the task and the import enables it again, so don't apply that change;
+     the task and the import enables it again. Applying it is harmless;
    - run `mise run truenas:update` again, which should report no update.
 
 `mise run truenas:update:backup` takes the backups alone, for example before

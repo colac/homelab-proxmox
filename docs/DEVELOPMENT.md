@@ -52,7 +52,8 @@ workloads the app comes first.
 | Inventory / SSH check | — | `mise run inventory` / `ping` | `mise run inventory <app>` / `ping <app>` |
 | Packer (credentials) | `mise run packer:validate <release>` / `packer:build <release>` | — | — |
 | DNS (credentials) | `mise run dns:plan` / `dns:apply` / `dns:tf <args>` / `dns:play <playbook>` | — | — |
-| Secrets | `mise run secrets:edit [dns]` / `secrets:check` | `mise run secrets:edit` / `secrets:check` | same, plus `secrets:edit <app>` |
+| TrueNAS | `mise run truenas:play <playbook>` / `truenas:inventory` / `truenas:update[:backup\|:apply]`; `truenas:certificate` (credentials) | — | — |
+| Secrets | `mise run secrets:edit [dns\|TrueNAS]` / `secrets:check` | `mise run secrets:edit` / `secrets:check` | same, plus `secrets:edit <app>` |
 | Next release version | `mise run release:dry-run` | same | same |
 
 A bare `terraform`, `packer` or `ansible-playbook` gets no credentials, by

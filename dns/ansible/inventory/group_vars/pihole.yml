@@ -18,6 +18,8 @@ pihole_local_records:
     ip: 192.168.1.43
   - name: kibana           # monitoring repo — kibana_fqdn
     ip: 192.168.1.87
+  - name: truenas          # core TrueNAS/ — its web UI's certificate names it
+    ip: 192.168.1.214
   - fqdn: home-nas.local   # carried over from the hand-built Pi-hole
     ip: 192.168.1.69
 

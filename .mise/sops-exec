@@ -14,7 +14,7 @@
 # `eval` would re-parse the plaintext as shell, and any value with a space,
 # quote or `$` would break or be word-split.
 #
-# Profiles in this repo: packer, terraform, dns.
+# Profiles in this repo: packer, terraform, dns, truenas.
 # The same script, with different profiles, lives in each homelab repo.
 set -euo pipefail
 
@@ -119,8 +119,16 @@ case $profile in
     put DNS_ZONE dns_zone
     put PIHOLE_WEB_PASSWORD pihole_web_password
     ;;
+  truenas)
+    # The web UI's certificate, from TrueNAS/secrets.yaml. Read back by
+    # lookup('env', …) in TrueNAS/ansible/inventory/group_vars/truenas.yml.
+    load "$root/TrueNAS/secrets.yaml"
+    need dns_zone cloudflare_dns_api_token
+    put DNS_ZONE dns_zone
+    put CLOUDFLARE_DNS_API_TOKEN cloudflare_dns_api_token
+    ;;
   *)
-    echo "sops-exec: unknown profile '$profile' (this repo has: packer, terraform, dns)" >&2
+    echo "sops-exec: unknown profile '$profile' (this repo has: packer, terraform, dns, truenas)" >&2
     exit 2
     ;;
 esac

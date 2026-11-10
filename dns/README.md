@@ -118,8 +118,9 @@ dig doubleclick.net +short                       # 0.0.0.0 — blocked
 dig github.com +short                            # real addresses — upstreams work
 ```
 
-Then the things the records exist for: `https://nextcloud.<zone>` and
-`https://kibana.<zone>` open without a certificate warning, and
+Then the things the records exist for: `https://nextcloud.<zone>`,
+`https://kibana.<zone>` and `https://truenas.<zone>` open without a
+certificate warning, and
 `mise run dns:plan` reaches the Proxmox API by name. Off the LAN, on Tailscale:
 `dig nextcloud.<zone> +short` returns `192.168.1.43`. In the admin UI, the
 query log shows the laptop's queries arriving, and Settings → DNS shows the

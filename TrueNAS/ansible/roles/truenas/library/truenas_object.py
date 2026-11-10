@@ -13,6 +13,9 @@ description:
   - Queries C(<namespace>.query) with I(filters), then creates, updates or
     deletes so the object matches I(data). Only the fields in I(data) are
     compared, so unmanaged fields keep whatever value TrueNAS gives them.
+  - With I(singleton), the namespace is a settings object instead (C(ssh),
+    C(smb), C(system.general)): read with C(<namespace>.config), changed with
+    C(<namespace>.update), never created or deleted.
   - Field names are the TrueNAS API's own (v25.10), unchanged.
 options:
   namespace:
@@ -20,10 +23,25 @@ options:
     type: str
     required: true
   filters:
-    description: Query filters that select exactly one object, e.g. C([["name", "=", "media"]]).
+    description:
+      - Query filters that select exactly one object, e.g. C([["name", "=", "media"]]).
+      - Required unless I(singleton).
     type: list
     elements: raw
-    required: true
+  singleton:
+    description: The namespace is one settings object (C(.config) and C(.update), no id).
+    type: bool
+    default: false
+  job:
+    description: C(.create), C(.update) and C(.delete) are jobs (C(certificate)); wait for each to finish.
+    type: bool
+    default: false
+  update_extra:
+    description:
+      - Arguments sent with an update and never compared, e.g.
+        C({"ui_restart_delay": 5}) for C(system.general).
+    type: dict
+    default: {}
   data:
     description: Desired fields, as the create/update methods take them.
     type: dict
@@ -70,8 +88,12 @@ options:
 
 import json
 import subprocess
+import time
 
 from ansible.module_utils.basic import AnsibleModule
+
+# A job (certificate.create runs an ACME order) gets this long to finish.
+JOB_TIMEOUT = 600
 
 
 class MiddlewareError(Exception):
@@ -92,6 +114,25 @@ def midclt(method, *args):
         # midclt prints string results raw (system.version → TrueNAS-25.10.7),
         # everything else as JSON.
         return out
+
+
+def wait_job(job_id):
+    # Called without -j, a job method returns its job id at once. Poll the job
+    # rather than parse `midclt call -j`, which mixes progress lines into stdout.
+    deadline = time.time() + JOB_TIMEOUT
+    while time.time() < deadline:
+        jobs = midclt("core.get_jobs", [["id", "=", job_id]])
+        if jobs and jobs[0]["state"] == "SUCCESS":
+            return jobs[0]["result"]
+        if jobs and jobs[0]["state"] in ("FAILED", "ABORTED"):
+            raise MiddlewareError("job %s %s: %s" % (job_id, jobs[0]["state"], jobs[0].get("error")))
+        time.sleep(3)
+    raise MiddlewareError("job %s did not finish in %d seconds" % (job_id, JOB_TIMEOUT))
+
+
+def call(method, job, *args):
+    result = midclt(method, *args)
+    return wait_job(result) if job else result
 
 
 def is_property(value):
@@ -167,6 +208,16 @@ def resolve_refs(refs, data):
     return missing
 
 
+def shown(data, refs, declared):
+    # Not created yet (check mode): show the declared name, not a null id.
+    out = dict(data)
+    for ref in refs:
+        v = out.get(ref["key"])
+        if ref["key"] in out and (v is None or (isinstance(v, list) and None in v)):
+            out[ref["key"]] = declared[ref["key"]]
+    return out
+
+
 def visible(current, keys):
     out = {}
     for k in keys:
@@ -185,7 +236,10 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             namespace=dict(type="str", required=True),
-            filters=dict(type="list", elements="raw", required=True),
+            filters=dict(type="list", elements="raw"),
+            singleton=dict(type="bool", default=False),
+            job=dict(type="bool", default=False),
+            update_extra=dict(type="dict", default={}),
             data=dict(type="dict", default={}),
             secret_data=dict(type="dict", default={}, no_log=True),
             create_only=dict(type="list", elements="str", default=[]),
@@ -195,18 +249,24 @@ def main():
             allow_delete=dict(type="bool", default=False),
             delete_args=dict(type="list", elements="raw", default=[]),
         ),
+        required_if=[("singleton", False, ["filters"])],
         supports_check_mode=True,
     )
     p = module.params
     ns = p["namespace"]
     result = dict(changed=False, namespace=ns, id=None, action="none")
+    if p["singleton"] and p["state"] == "absent":
+        module.fail_json(msg="%s: a settings object cannot be absent" % ns, **result)
 
     try:
-        found = midclt(ns + ".query", p["filters"])
-        if len(found) > 1:
-            module.fail_json(msg="%s: filters %s match %d objects; they must select one"
-                             % (ns, json.dumps(p["filters"]), len(found)), **result)
-        current = found[0] if found else None
+        if p["singleton"]:
+            current = midclt(ns + ".config")
+        else:
+            found = midclt(ns + ".query", p["filters"])
+            if len(found) > 1:
+                module.fail_json(msg="%s: filters %s match %d objects; they must select one"
+                                 % (ns, json.dumps(p["filters"]), len(found)), **result)
+            current = found[0] if found else None
 
         if p["state"] == "absent":
             if current is None:
@@ -217,7 +277,7 @@ def main():
                                      % current["id"], **result)
             result.update(changed=True, id=current["id"], action="delete")
             if not module.check_mode:
-                midclt(ns + ".delete", current["id"], *p["delete_args"])
+                call(ns + ".delete", p["job"], current["id"], *p["delete_args"])
             module.exit_json(**result)
 
         data = json.loads(json.dumps(p["data"]))
@@ -226,37 +286,38 @@ def main():
             module.fail_json(msg="%s: referenced objects do not exist: %s" % (ns, ", ".join(missing)),
                              **result)
 
+        if missing:
+            result["warnings"] = ["created after: %s (check mode)" % ", ".join(missing)]
+
         if current is None:
-            after = dict(data)
-            for ref in p["refs"]:
-                # Not created yet (check mode): show the declared name, not a null id.
-                v = after.get(ref["key"])
-                if v is None or (isinstance(v, list) and None in v):
-                    after[ref["key"]] = p["data"][ref["key"]]
-            result.update(changed=True, action="create", diff=dict(before={}, after=after))
-            if missing:
-                result["warnings"] = ["created after: %s (check mode)" % ", ".join(missing)]
+            result.update(changed=True, action="create",
+                          diff=dict(before={}, after=shown(data, p["refs"], p["data"])))
             if not module.check_mode:
-                created = midclt(ns + ".create", dict(data, **p["secret_data"]))
+                created = call(ns + ".create", p["job"], dict(data, **p["secret_data"]))
                 result["id"] = created.get("id") if isinstance(created, dict) else created
             module.exit_json(**result)
 
-        result["id"] = current["id"]
+        result["id"] = current.get("id")
         for key in p["immutable"]:
             if key in data and not same(data[key], field(current, key)):
                 module.fail_json(msg="%s %s: %s is %s on the system but %s in the declaration; "
                                      "it is immutable here (it owns files on disk) — fix the "
                                      "declaration, or change it deliberately in the UI"
-                                 % (ns, current["id"], key, json.dumps(visible(current, [key])[key]),
+                                 % (ns, current.get("id"), key, json.dumps(visible(current, [key])[key]),
                                     json.dumps(data[key])), **result)
 
         skip = set(p["create_only"]) | set(p["immutable"])
         changed = {k: v for k, v in data.items() if k not in skip and not same(v, field(current, k))}
         if changed:
             result.update(changed=True, action="update",
-                          diff=dict(before=visible(current, changed.keys()), after=changed))
+                          diff=dict(before=visible(current, changed.keys()),
+                                    after=shown(changed, p["refs"], p["data"])))
             if not module.check_mode:
-                midclt(ns + ".update", current["id"], changed)
+                payload = dict(changed, **p["update_extra"])
+                if p["singleton"]:
+                    call(ns + ".update", p["job"], payload)
+                else:
+                    call(ns + ".update", p["job"], current["id"], payload)
         module.exit_json(**result)
     except MiddlewareError as exc:
         module.fail_json(msg=str(exc), **result)

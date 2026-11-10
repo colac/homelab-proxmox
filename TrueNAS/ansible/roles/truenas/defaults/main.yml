@@ -36,5 +36,24 @@ truenas_snapshot_tasks: []
 # lists {dataset, naming_schema} of tasks declared above — resolved to ids.
 truenas_replication_tasks: []
 
+# Settings objects, keyed by API namespace, each with that namespace's
+# .update fields: {ssh: {passwordauth: false}, smb: {...}, ...}. Never
+# system.general's ui_certificate or ui_httpsredirect: 40-certificate.yml owns
+# those.
+truenas_settings: {}
+
+# Services and whether each starts at boot: {cifs: true, nfs: false, ...}.
+truenas_services: {}
+
+# system.ntpserver.create fields; `address` identifies a server.
+truenas_ntp_servers: []
+
+# pool.scrub.create fields; `pool` is the pool's NAME (resolved to its id)
+# and identifies the task.
+truenas_scrub_tasks: []
+
+# reporting.exporters.create fields; `name` identifies an exporter.
+truenas_reporting_exporters: []
+
 # Keys that steer the role and are never sent to the API.
 truenas_control_keys: [state, password_env, allow_delete]

@@ -61,7 +61,7 @@ description = "ansible-lint (production profile) on the colac.homelab collection
 run = '''
 (cd ansible && ansible-lint)
 (cd dns/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml --syntax-check)
-(cd TrueNAS/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml playbooks/20-backup-usb.yml playbooks/90-selftest.yml --syntax-check)
+(cd TrueNAS/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml playbooks/20-backup-usb.yml playbooks/30-update.yml playbooks/40-certificate.yml playbooks/90-selftest.yml --syntax-check)
 (cd updates && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook -i inventory/hosts.yml.example colac.homelab.update --syntax-check)
 '''
 
@@ -82,7 +82,7 @@ run = "semantic-release --no-ci --dry-run"
 # Secrets
 # --------------------------------------------------------------------------
 [tasks."secrets:edit"]
-description = "Edit a secrets file in VS Code: no argument = ./secrets.yaml (Packer, Terraform), or `dns`"
+description = "Edit a secrets file in VS Code: no argument = ./secrets.yaml (Packer, Terraform), `dns` or `TrueNAS`"
 # mise appends arguments to the run line; `bash -c '…' name` turns them into
 # positional parameters, so "$1" is the folder (or nothing).
 run = """bash -c 'sops "${1:+$1/}secrets.yaml"' secrets:edit"""
@@ -96,6 +96,7 @@ run = [
   ".mise/sops-exec --check packer",
   ".mise/sops-exec --check terraform",
   ".mise/sops-exec --check dns",
+  ".mise/sops-exec --check truenas",
 ]
 
 # --------------------------------------------------------------------------
@@ -133,15 +134,22 @@ env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
 run = "ansible-inventory --graph"
 
 # --------------------------------------------------------------------------
-# TrueNAS — users, shares, snapshot and backup tasks, through its API
-# (TrueNAS/ansible). No secrets yet: existing users keep their passwords and
-# new ones get a random one. No sudo: midclt runs as truenas_admin.
+# TrueNAS — users, shares, snapshot and backup tasks, settings, through its
+# API (TrueNAS/ansible). No secrets, except the certificate's play: existing
+# users keep their passwords and new ones get a random one. No sudo: midclt
+# runs as truenas_admin.
 # --------------------------------------------------------------------------
 [tasks."truenas:play"]
 description = "ansible-playbook for TrueNAS: mise run truenas:play playbooks/site.yml --check --diff"
 dir = "{{config_root}}/TrueNAS/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
 run = "ansible-playbook"
+
+[tasks."truenas:certificate"]
+description = "The web UI's Let's Encrypt certificate (TrueNAS/secrets.yaml): mise run truenas:certificate --check --diff"
+dir = "{{config_root}}/TrueNAS/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
+run = "{{config_root}}/.mise/sops-exec truenas ansible-playbook playbooks/40-certificate.yml"
 
 [tasks."truenas:update"]
 description = "Report TrueNAS's pending update, boot environments, pools and running jobs; changes nothing"

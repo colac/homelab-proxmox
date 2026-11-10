@@ -161,11 +161,17 @@ the whole box is lost — so alerts and backups are not optional extras.
 
 ### Tier 3 — security
 
-1. **HTTPS for the web UI.** **System → General → GUI** — set a GUI SSL
-   Certificate (the built-in self-signed one at minimum) and tick redirect
-   HTTP→HTTPS. The install serves plain HTTP.
+1. **HTTPS for the web UI.** The install serves plain HTTP. Not in the UI:
+   `mise run truenas:certificate` gets a Let's Encrypt certificate for
+   `truenas.<zone>`, sets it as the UI's and redirects HTTP to HTTPS
+   ([ansible/README.md](ansible/README.md#the-web-uis-certificate)). TrueNAS
+   renews it by itself.
 2. **Two-factor auth.** **Credentials → 2FA** — enable and scan with an
    authenticator app. Keep root SSH login disabled (the default).
+3. **SSH by key only, no usage statistics.** Declared in
+   [`ansible/inventory/group_vars/truenas.yml`](ansible/inventory/group_vars/truenas.yml)
+   (`ssh.passwordauth: false`, `system.general.usage_collection: false`), so
+   a reinstall gets them back from `site.yml`.
 
 ### Tier 4 — housekeeping
 
