@@ -140,10 +140,13 @@ run = "ansible-inventory --graph"
 # runs as truenas_admin.
 # --------------------------------------------------------------------------
 [tasks."truenas:play"]
-description = "ansible-playbook for TrueNAS: mise run truenas:play playbooks/site.yml --check --diff"
+description = "ansible-playbook for TrueNAS, playbooks/site.yml unless a playbook is named: mise run truenas:play --check --diff"
 dir = "{{config_root}}/TrueNAS/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/TrueNAS/ansible/ansible.cfg" }
-run = "ansible-playbook"
+# Arguments become "$@" (see secrets:edit). Any that is an existing .yml file
+# is a playbook; with none, site.yml goes first. `-e @vars.yml` does not
+# count: "@vars.yml" is not a file.
+run = """bash -c 'for a in "$@"; do case "$a" in *.yml|*.yaml) [ -f "$a" ] && exec ansible-playbook "$@";; esac; done; exec ansible-playbook playbooks/site.yml "$@"' truenas:play"""
 
 [tasks."truenas:certificate"]
 description = "The web UI's Let's Encrypt certificate (TrueNAS/secrets.yaml): mise run truenas:certificate --check --diff"
