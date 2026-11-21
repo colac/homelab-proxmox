@@ -1,0 +1,12 @@
+{{ {
+  'managed_by': 'Ansible (colac.homelab.agent_access); edits here are lost',
+  'act_enabled': agent_access_act_enabled | bool,
+  'restart_units': agent_access_restart_units,
+  'restart_containers': agent_access_restart_containers,
+  'free_disk': agent_access_free_disk,
+  'journal_vacuum_size': agent_access_journal_vacuum_size,
+  'cooldown_hours': agent_access_cooldown_hours | float,
+  'max_actions_per_day': agent_access_max_actions_per_day | int,
+  'du_paths': agent_access_du_paths,
+  'log_files': agent_access_log_files,
+} | to_nice_json(indent=2) }}

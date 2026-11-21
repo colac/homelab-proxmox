@@ -1,0 +1,418 @@
+#!/usr/bin/python3
+"""homelab-agent-ctl: the only program the homelab-agent SSH keys can run.
+
+Installed by colac.homelab.agent_access. sshd runs it as a forced command
+(authorized_keys: command="homelab-agent-ctl --tier read|act", restrict),
+so the AI's key opens no shell, no port forwarding, no file transfer. The
+client's requested command arrives in SSH_ORIGINAL_COMMAND and is parsed
+here with shlex, never by a shell. Pattern: Red Hat's MCP server for RHEL
+(a dedicated non-root user, a fixed read-only toolset, logs through the adm
+and systemd-journal groups, output redacted) with a second, approved tier.
+
+  read tier  diagnostics. Runs as homelab-agent; the few verbs that need
+             root (Docker, du, the action history) go through sudo to this
+             same program, which validates everything again.
+  act tier   mitigation (L2): restart a listed unit or container, free disk
+             space (caches and unused images only, never data or volumes).
+             Only with the act key, only when the policy enables it, only on
+             listed targets, and never twice on one target within the
+             cooldown: a second restart that soon means a bigger problem,
+             and the answer is a human, not another restart.
+
+Every call is logged to syslog (tag homelab-agent-ctl), which the Elastic
+Agent ships to Kibana. Policy: /etc/homelab-agent/policy.json (root-owned).
+Standard library only.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import socket
+import subprocess
+import sys
+import syslog
+import time
+from pathlib import Path
+
+SELF = "/usr/local/sbin/homelab-agent-ctl"
+POLICY = Path("/etc/homelab-agent/policy.json")
+STATE = Path("/var/lib/homelab-agent-ctl/actions.json")
+MAX_OUTPUT = 200_000
+TIMEOUT = 120
+
+UNIT = re.compile(r"[A-Za-z0-9@_:][A-Za-z0-9@._:-]{0,127}")
+CONTAINER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+SINCE = re.compile(r"[0-9]{1,4}[mhd]")
+LEVELS = {"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"}
+
+# Best effort, like Red Hat's built-in rules: credentials that commonly turn
+# up in logs and status output. Not a guarantee; the identity's limits are.
+REDACT = [
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
+     "[REDACTED:private-key]"),
+    (re.compile(r"(?i)(authorization:\s*(?:bearer|basic|apikey|token)\s+)[^\s\"']+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{12,}"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)((?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key"
+                r"|client[_-]?secret|auth[_-]?key)[\"']?\s*[:=]\s*[\"']?)[^\s\"',;&]+"), r"\1[REDACTED]"),
+    (re.compile(r"(://[^/\s:@]+:)[^@\s/]+@"), r"\1[REDACTED]@"),
+    (re.compile(r"\btk_[a-z0-9]{29}\b"), "[REDACTED:ntfy-token]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "[REDACTED:jwt]"),
+    (re.compile(r"(hc-ping\.com/)[0-9a-f-]{36}"), r"\1[REDACTED]"),
+]
+
+
+class Refused(Exception):
+    pass
+
+
+def redact(text: str) -> str:
+    for pattern, repl in REDACT:
+        text = pattern.sub(repl, text)
+    return text
+
+
+def audit(message: str) -> None:
+    syslog.openlog("homelab-agent-ctl", syslog.LOG_PID, syslog.LOG_AUTH)
+    syslog.syslog(syslog.LOG_NOTICE, message)
+
+
+def load_policy() -> dict:
+    try:
+        return json.loads(POLICY.read_text())
+    except (OSError, ValueError) as exc:
+        raise Refused(f"no readable policy at {POLICY}: {exc}") from exc
+
+
+# --------------------------------------------------------------------------
+# Arguments
+# --------------------------------------------------------------------------
+def options(args: list[str], allowed: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    """Split --name value options from positionals; refuse anything unknown."""
+    pos, opts = [], {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--"):
+            name = a[2:]
+            if name not in allowed or i + 1 >= len(args):
+                raise Refused(f"unknown or incomplete option {a}")
+            opts[name] = args[i + 1]
+            i += 2
+        elif a.startswith("-"):
+            raise Refused(f"unknown option {a}")
+        else:
+            pos.append(a)
+            i += 1
+    for name, value in opts.items():
+        kind = allowed[name]
+        if kind == "since" and not SINCE.fullmatch(value):
+            raise Refused(f"--{name} takes a duration such as 30m, 6h, 2d")
+        if kind == "lines" and not (value.isdigit() and 1 <= int(value) <= 2000):
+            raise Refused(f"--{name} takes a number from 1 to 2000")
+        if kind == "priority" and value not in LEVELS:
+            raise Refused(f"--{name} takes one of {', '.join(sorted(LEVELS))}")
+    return pos, opts
+
+
+def one(pos: list[str], what: str, pattern: re.Pattern | None = None, choices: list | None = None) -> str:
+    if len(pos) != 1:
+        raise Refused(f"expected exactly one {what}")
+    value = pos[0]
+    if pattern and not pattern.fullmatch(value):
+        raise Refused(f"not a valid {what}: {value!r}")
+    if choices is not None and value not in choices:
+        raise Refused(f"{what} {value!r} is not allowed here (policy: {', '.join(choices) or 'none'})")
+    return value
+
+
+def none(pos: list[str]) -> None:
+    if pos:
+        raise Refused("this verb takes no arguments")
+
+
+def since_of(opts: dict, default: str = "1h") -> str:
+    """30m, 6h, 2d -> journalctl's relative form: -30min, -6h, -2d."""
+    value = opts.get("since", default)
+    unit = {"m": "min", "h": "h", "d": "d"}[value[-1]]
+    return f"-{value[:-1]}{unit}"
+
+
+# --------------------------------------------------------------------------
+# Verbs: name -> (tier, needs root, builder). A builder validates its
+# arguments and returns the commands to run (lists, never shell strings).
+# --------------------------------------------------------------------------
+DOCKER_TABLE = "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+
+
+def v_failed(args, policy):
+    none(args)
+    return [["systemctl", "--failed", "--no-pager", "--plain"]]
+
+
+def v_status(args, policy):
+    unit = one(args, "unit name", UNIT)
+    return [["systemctl", "status", "--no-pager", "--lines=20", unit]]
+
+
+def v_journal(args, policy):
+    pos, opts = options(args, {"since": "since", "lines": "lines", "priority": "priority"})
+    cmd = ["journalctl", "--no-pager", "-o", "short-iso", f"--since={since_of(opts)}",
+           "-n", opts.get("lines", "200")]
+    if opts.get("priority"):
+        cmd += ["-p", opts["priority"]]
+    if pos:
+        cmd += ["-u", one(pos, "unit name", UNIT)]
+    return [cmd]
+
+
+def v_logfile(args, policy):
+    pos, opts = options(args, {"lines": "lines"})
+    path = one(pos, "log file", choices=policy.get("log_files", []))
+    return [["tail", "-n", opts.get("lines", "200"), path]]
+
+
+def v_df(args, policy):
+    none(args)
+    return [["df", "-hT", "-x", "tmpfs", "-x", "devtmpfs", "-x", "overlay", "-x", "squashfs",
+             "-x", "efivarfs"]]
+
+
+def v_du(args, policy):
+    path = one(args, "path", choices=policy.get("du_paths", []))
+    return [["du", "-xh", "--max-depth=1", path]]
+
+
+def v_top(args, policy):
+    none(args)
+    cols = "pid,user,pcpu,pmem,rss,etime,comm"
+    return [["ps", "-eo", cols, "--sort=-pcpu"], ["ps", "-eo", cols, "--sort=-pmem"]]
+
+
+def v_facts(args, policy):
+    none(args)
+    return [["uname", "-srm"], ["uptime"], ["free", "-m"], ["cat", "/etc/os-release"]]
+
+
+def v_net(args, policy):
+    none(args)
+    return [["ip", "-brief", "address"], ["ss", "-tulnH"]]
+
+
+def v_docker_ps(args, policy):
+    none(args)
+    return [["docker", "ps", "-a", "--format", DOCKER_TABLE]]
+
+
+def v_docker_logs(args, policy):
+    pos, opts = options(args, {"since": "since", "lines": "lines"})
+    name = one(pos, "container name", CONTAINER)
+    return [["docker", "logs", "--since", opts.get("since", "1h"), "--tail", opts.get("lines", "200"), name]]
+
+
+# State only: `docker inspect` in full shows the environment, which holds secrets.
+def v_docker_state(args, policy):
+    name = one(args, "container name", CONTAINER)
+    return [["docker", "inspect", "--format", "{{json .State}}", name]]
+
+
+def v_docker_stats(args, policy):
+    none(args)
+    return [["docker", "stats", "--no-stream", "--format",
+             "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"]]
+
+
+def v_docker_df(args, policy):
+    none(args)
+    return [["docker", "system", "df"]]
+
+
+def v_restart_unit(args, policy):
+    unit = one(args, "unit", UNIT, policy.get("restart_units", []))
+    return [["systemctl", "restart", unit], ["systemctl", "is-active", unit]]
+
+
+def v_restart_container(args, policy):
+    name = one(args, "container", CONTAINER, policy.get("restart_containers", []))
+    return [["docker", "restart", name], ["docker", "inspect", "--format", "{{.State.Status}}", name]]
+
+
+# Caches and unused images only. Never `docker system prune` (it can take
+# volumes), never `image prune -a` (it removes images stopped containers need).
+def v_free_disk(args, policy):
+    kind = one(args, "kind", choices=policy.get("free_disk", []))
+    return {
+        "journal": [["journalctl", f"--vacuum-size={policy.get('journal_vacuum_size', '200M')}"]],
+        "apt": [["apt-get", "clean"]],
+        "docker-images": [["docker", "image", "prune", "--force"], ["docker", "builder", "prune", "--force"]],
+    }[kind]
+
+
+def v_actions(args, policy):
+    none(args)
+    return []  # answered from the state file in run_verb
+
+
+VERBS = {
+    # read tier
+    "failed": ("read", False, v_failed, "units that failed"),
+    "status": ("read", False, v_status, "<unit>: systemctl status"),
+    "journal": ("read", False, v_journal, "[<unit>] [--since 1h] [--lines 200] [--priority warning]"),
+    "logfile": ("read", True, v_logfile, "<path> [--lines 200]: a log file the policy lists"),
+    "df": ("read", False, v_df, "filesystems"),
+    "du": ("read", True, v_du, "<path>: sizes one level down, allowed paths only"),
+    "top": ("read", False, v_top, "processes by CPU and by memory"),
+    "facts": ("read", False, v_facts, "OS, kernel, uptime, memory"),
+    "net": ("read", False, v_net, "addresses and listening sockets"),
+    "docker-ps": ("read", True, v_docker_ps, "containers"),
+    "docker-logs": ("read", True, v_docker_logs, "<container> [--since 1h] [--lines 200]"),
+    "docker-state": ("read", True, v_docker_state, "<container>: its State, not its environment"),
+    "docker-stats": ("read", True, v_docker_stats, "CPU and memory per container"),
+    "docker-df": ("read", True, v_docker_df, "Docker disk use"),
+    "actions": ("read", True, v_actions, "the mitigation history and cooldowns"),
+    # act tier (L2)
+    "restart-unit": ("act", True, v_restart_unit, "<unit>: a listed unit"),
+    "restart-container": ("act", True, v_restart_container, "<container>: a listed container"),
+    "free-disk": ("act", True, v_free_disk, "journal|apt|docker-images: caches, never data"),
+}
+
+
+# --------------------------------------------------------------------------
+# The act tier's memory: cooldown per target, cap per day
+# --------------------------------------------------------------------------
+def load_state() -> dict:
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        return {"actions": []}
+
+
+def save_state(state: dict) -> None:
+    STATE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=1))
+    os.chmod(tmp, 0o600)
+    tmp.replace(STATE)
+
+
+def check_and_record(verb: str, target: str, policy: dict) -> None:
+    now = time.time()
+    state = load_state()
+    recent = [a for a in state["actions"] if now - a["at"] < 7 * 86400]
+    cooldown = float(policy.get("cooldown_hours", 6)) * 3600
+    same = [a for a in recent if a["verb"] == verb and a["target"] == target]
+    if same and now - same[-1]["at"] < cooldown:
+        hours = (now - same[-1]["at"]) / 3600
+        raise Refused(
+            f"{verb} {target} already ran {hours:.1f} h ago; the cooldown is "
+            f"{policy.get('cooldown_hours', 6)} h. Needing it again this soon means a "
+            "bigger problem: escalate to the human, do not repeat it.")
+    today = [a for a in recent if now - a["at"] < 86400]
+    if len(today) >= int(policy.get("max_actions_per_day", 3)):
+        raise Refused(f"{len(today)} mitigations on this host in the last 24 h, the daily "
+                      "maximum: escalate to the human.")
+    recent.append({"verb": verb, "target": target, "at": now,
+                   "when": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+    state["actions"] = recent
+    save_state(state)  # before running: a crash mid-action still counts
+
+
+# --------------------------------------------------------------------------
+# Running
+# --------------------------------------------------------------------------
+def run(cmds: list[list[str]]) -> int:
+    rc = 0
+    out = []
+    for cmd in cmds:
+        try:
+            res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, timeout=TIMEOUT, check=False,
+                                 env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
+                                      "SYSTEMD_COLORS": "0", "SYSTEMD_PAGER": ""})
+            text = res.stdout.decode("utf-8", "replace")
+            rc = rc or res.returncode
+        except FileNotFoundError:
+            text, rc = f"{cmd[0]} is not installed on this host\n", 127
+        except subprocess.TimeoutExpired:
+            text, rc = f"{cmd[0]} timed out after {TIMEOUT} s\n", 124
+        if len(cmds) > 1:
+            out.append(f"$ {shlex.join(cmd)}\n")
+        out.append(text)
+    text = redact("".join(out))
+    if len(text) > MAX_OUTPUT:
+        text = text[:MAX_OUTPUT] + f"\n[truncated at {MAX_OUTPUT} characters]\n"
+    sys.stdout.write(text)
+    return rc
+
+
+def help_text(tier: str, policy: dict) -> str:
+    lines = [f"homelab-agent-ctl on {socket.gethostname()}, tier: {tier}"]
+    for name, (vtier, _root, _fn, doc) in VERBS.items():
+        if vtier == "read" or tier == "act":
+            lines.append(f"  {name:18} {doc}")
+    lines.append(f"act tier enabled here: {bool(policy.get('act_enabled'))}")
+    for key in ("restart_units", "restart_containers", "free_disk", "du_paths", "log_files"):
+        lines.append(f"  {key}: {', '.join(policy.get(key, [])) or '-'}")
+    lines.append(f"  cooldown {policy.get('cooldown_hours', 6)} h per target, "
+                 f"at most {policy.get('max_actions_per_day', 3)} mitigations a day")
+    return "\n".join(lines) + "\n"
+
+
+def dispatch(tier: str, words: list[str], as_root: bool, client: str) -> int:
+    if tier not in ("read", "act"):
+        raise Refused(f"unknown tier {tier!r}")
+    policy = load_policy()
+    verb, args = words[0], words[1:]
+    if verb == "help":
+        sys.stdout.write(help_text(tier, policy))
+        return 0
+    if verb not in VERBS:
+        raise Refused(f"unknown verb {verb!r}; `help` lists them")
+    vtier, needs_root, builder, _doc = VERBS[verb]
+    if vtier == "act":
+        if tier != "act":
+            raise Refused("this key may only read; mitigations need the act key and approval")
+        if not policy.get("act_enabled"):
+            raise Refused("the act tier is disabled on this host (agent_access_act_enabled)")
+    cmds = builder(args, policy)  # validates; raises Refused
+    if needs_root and not as_root:
+        audit(f"{client} tier={tier} sudo: {shlex.join(words)}")
+        return subprocess.run(["sudo", "-n", SELF, "--root", tier, client, *words],
+                              stdin=subprocess.DEVNULL, check=False).returncode
+    if vtier == "act":
+        check_and_record(verb, args[0], policy)
+    audit(f"{client} tier={tier} run: {shlex.join(words)}")
+    if verb == "actions":
+        sys.stdout.write(json.dumps(load_state().get("actions", []), indent=1) + "\n")
+        sys.stdout.write(f"act tier enabled: {bool(policy.get('act_enabled'))}; cooldown "
+                         f"{policy.get('cooldown_hours', 6)} h per target; at most "
+                         f"{policy.get('max_actions_per_day', 3)} mitigations a day\n")
+        return 0
+    rc = run(cmds)
+    audit(f"{client} tier={tier} done: {verb} rc={rc}")
+    return rc
+
+
+def main(argv: list[str]) -> int:
+    try:
+        if len(argv) >= 5 and argv[1] == "--root":
+            if os.geteuid() != 0:
+                raise Refused("--root is for sudo only")
+            return dispatch(argv[2], argv[4:] or ["help"], True, argv[3])
+        if len(argv) == 3 and argv[1] == "--tier":
+            client = (os.environ.get("SSH_CLIENT") or "local").split()[0]
+            try:
+                words = shlex.split(os.environ.get("SSH_ORIGINAL_COMMAND", ""))
+            except ValueError as exc:
+                raise Refused(f"cannot parse the command: {exc}") from exc
+            return dispatch(argv[2], words or ["help"], False, f"from={client}")
+        raise Refused("usage: run through SSH (authorized_keys forced command)")
+    except Refused as exc:
+        audit(f"refused: {exc} (command: {os.environ.get('SSH_ORIGINAL_COMMAND', '')!r})")
+        print(f"refused: {exc}", file=sys.stderr)
+        return 77
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

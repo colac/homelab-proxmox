@@ -1,0 +1,155 @@
+---
+# A limited account for AI agents on this host (README.md next to this
+# file). On the host: the account, the dispatcher and its policy, one sudo
+# rule, the two forced-command keys. On the controller: an ssh config entry
+# and this host's key, so scripts/hostctl.py (monitoring) can connect with
+# host-key checking on. Then a real call proves it from the controller.
+
+- name: Check the agent's keys exist on the controller
+  ansible.builtin.assert:
+    that: agent_access_read_key | trim | length > 0
+    fail_msg: >-
+      No {{ agent_access_key_dir }}/read_ed25519.pub on this machine: run
+      `mise run agent install` in homelab-proxmox-monitoring first (it creates
+      the agent's two key pairs).
+    quiet: true
+
+- name: Install sudo and Python, which the dispatcher needs
+  ansible.builtin.apt:
+    name: [sudo, python3]
+    state: present
+
+# "*" rather than a locked "!": no password can ever match, and sshd with
+# UsePAM still accepts the key. Groups as Red Hat recommends for its AI
+# troubleshooting account: logs without sudo. Never `docker` (root-equivalent).
+- name: Create the account
+  ansible.builtin.user:
+    name: "{{ agent_access_user }}"
+    comment: AI agent (colac.homelab.agent_access), forced-command SSH only
+    system: true
+    shell: /bin/sh
+    home: "/var/lib/{{ agent_access_user }}"
+    create_home: true
+    password: "*"
+    groups: [adm, systemd-journal]
+    append: false
+
+# Root-owned home and keys: the account cannot change its own restrictions.
+- name: Own the account's home and .ssh as root
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "/var/lib/{{ agent_access_user }}"
+    - "/var/lib/{{ agent_access_user }}/.ssh"
+
+- name: Install the dispatcher
+  ansible.builtin.copy:
+    src: homelab-agent-ctl
+    dest: /usr/local/sbin/homelab-agent-ctl
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create the policy and state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/homelab-agent, mode: "0755" }
+    - { path: /var/lib/homelab-agent-ctl, mode: "0700" }
+
+- name: Write the policy
+  ansible.builtin.template:
+    src: policy.json.j2
+    dest: /etc/homelab-agent/policy.json
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Allow the dispatcher, and only it, to run as root
+  ansible.builtin.template:
+    src: sudoers.j2
+    dest: /etc/sudoers.d/homelab-agent
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+
+- name: Authorise the keys, each locked to the dispatcher
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/var/lib/{{ agent_access_user }}/.ssh/authorized_keys"
+    owner: root
+    group: root
+    mode: "0644"
+
+# ---------------------------------------------------------------------------
+# The controller's side
+# ---------------------------------------------------------------------------
+
+- name: Read this host's SSH key
+  ansible.builtin.slurp:
+    src: /etc/ssh/ssh_host_ed25519_key.pub
+  register: _agent_access_hostkey
+
+# Taken over the play's own SSH connection rather than ssh-keyscan, which
+# trusts whatever answers on the network.
+- name: Record this host's key for the agent (controller)
+  ansible.builtin.lineinfile:
+    path: "{{ agent_access_key_dir }}/known_hosts"
+    regexp: "^{{ ansible_host | regex_escape }} "
+    line: "{{ ansible_host }} {{ (_agent_access_hostkey.content | b64decode).split()[:2] | join(' ') }}"
+    create: true
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Add this host to the agent's ssh config (controller)
+  ansible.builtin.blockinfile:
+    path: "{{ agent_access_key_dir }}/config"
+    marker: "# {mark} {{ agent_access_client_alias }} (colac.homelab.agent_access)"
+    create: true
+    mode: "0600"
+    block: |
+      Host {{ agent_access_client_alias }}
+        HostName {{ ansible_host }}
+        User {{ agent_access_user }}
+        IdentityFile {{ agent_access_key_dir }}/read_ed25519
+        IdentitiesOnly yes
+        UserKnownHostsFile {{ agent_access_key_dir }}/known_hosts
+        StrictHostKeyChecking yes
+        BatchMode yes
+        RequestTTY no
+        ConnectTimeout 10
+      {% if agent_access_act_enabled | bool %}
+      Host {{ agent_access_client_alias }}-act
+        HostName {{ ansible_host }}
+        User {{ agent_access_user }}
+        IdentityFile {{ agent_access_key_dir }}/act_ed25519
+        IdentitiesOnly yes
+        UserKnownHostsFile {{ agent_access_key_dir }}/known_hosts
+        StrictHostKeyChecking yes
+        BatchMode yes
+        RequestTTY no
+        ConnectTimeout 10
+      {% endif %}
+  delegate_to: localhost
+  become: false
+
+- name: Prove it from the controller (the read key runs `help`, nothing else)
+  ansible.builtin.command:
+    argv: [ssh, -F, "{{ agent_access_key_dir }}/config", "{{ agent_access_client_alias }}", help]
+  register: _agent_access_probe
+  changed_when: false
+  failed_when: >-
+    _agent_access_probe.rc != 0 or 'homelab-agent-ctl on' not in _agent_access_probe.stdout
+  delegate_to: localhost
+  become: false
+  when: not ansible_check_mode

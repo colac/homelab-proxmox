@@ -1,0 +1,43 @@
+---
+# colac.homelab.agent_access: a limited account for AI agents on one host.
+# What it is and why: README.md next to this file.
+
+agent_access_user: homelab-agent
+
+# The two public keys, read from the controller where `mise run agent
+# install` (monitoring's agent/) generated them. A public key is not a
+# secret; the private halves never leave that folder.
+agent_access_key_dir: >-
+  {{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME')
+     | default(lookup('ansible.builtin.env', 'HOME') ~ '/.config', true) }}/homelab-agent/ssh
+agent_access_read_key: "{{ lookup('ansible.builtin.file', agent_access_key_dir ~ '/read_ed25519.pub', errors='ignore') | default('', true) }}"
+agent_access_act_key: "{{ lookup('ansible.builtin.file', agent_access_key_dir ~ '/act_ed25519.pub', errors='ignore') | default('', true) }}"
+
+# Where the keys may connect from (sshd's from= pattern): the LAN. Tailnet
+# clients reach the LAN through a subnet router, which rewrites their
+# address into it.
+agent_access_from: 192.168.1.0/24
+
+# The act tier (L2: mitigation after a human's approval). Off until the
+# approval flow exists and the plan's gate is met; then per host, in
+# inventory. Even on, it only touches the targets listed below.
+agent_access_act_enabled: false
+agent_access_restart_units: []
+agent_access_restart_containers: []
+# Kinds of disk clean-up: journal (vacuum to agent_access_journal_vacuum_size),
+# apt (apt-get clean), docker-images (dangling images and build cache; never
+# volumes, never `-a`). Hosts without Docker should drop docker-images.
+agent_access_free_disk: [journal, apt]
+agent_access_journal_vacuum_size: 200M
+# A second action on the same target within this many hours is refused: it
+# means a bigger problem, for a human. And a cap per host per day.
+agent_access_cooldown_hours: 6
+agent_access_max_actions_per_day: 3
+
+# Read tier: paths `du` may measure, log files `logfile` may tail.
+agent_access_du_paths: [/var/log, /var/cache/apt, /var/lib/docker, /opt, /tmp]
+agent_access_log_files: [/var/log/syslog, /var/log/auth.log, /var/log/kern.log, /var/log/dpkg.log, /var/log/apt/history.log]
+
+# The controller's client side: an ssh config entry and the host's key, for
+# monitoring's scripts/hostctl.py. The alias is the inventory name.
+agent_access_client_alias: "{{ inventory_hostname }}"

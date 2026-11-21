@@ -1,0 +1,6 @@
+# Managed by Ansible (colac.homelab.agent_access).
+# The account has no shell: sshd runs only the dispatcher. The dispatcher
+# re-runs itself as root for the verbs that need it, and validates its
+# arguments again there. Nothing else may run as root.
+Defaults:{{ agent_access_user }} env_reset, !requiretty
+{{ agent_access_user }} ALL=(root) NOPASSWD: /usr/local/sbin/homelab-agent-ctl --root *

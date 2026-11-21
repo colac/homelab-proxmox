@@ -27,7 +27,7 @@ In the consumer's `ansible/requirements.yml`:
 collections:
   - name: https://github.com/colac/homelab-proxmox.git#/ansible/
     type: git
-    version: v2.0.0     # a tag of this repo, never a branch
+    version: vX.Y.Z     # a tag of this repo, never a branch
 ```
 
 ```yaml
@@ -111,6 +111,16 @@ needs a manual `vgrename <vg-uuid> docker-vg` first.
 Why the disk is partitioned here and not in the Packer template: a full clone
 copies LVM metadata verbatim, so every VM would get byte-identical PV and VG
 UUIDs and moving a disk would need `vgimportclone`.
+
+## `agent_access`
+
+A limited account for AI agents on a Linux host (`homelab-agent`):
+key-only SSH locked to a dispatcher with fixed diagnostic verbs (read
+tier), and, off by default, restarts and disk clean-up on listed targets
+with a host-enforced cooldown (act tier). Red Hat's pattern for AI
+troubleshooting on RHEL. Details and verbs: [roles/agent_access/README.md](roles/agent_access/README.md).
+Consumers: core's `dns/` (both Pi-holes), monitoring and workloads (their
+VMs), each with its own restart lists in inventory.
 
 ## `update`
 

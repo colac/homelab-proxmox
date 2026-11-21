@@ -1,0 +1,7 @@
+# Managed by Ansible (colac.homelab.agent_access). Root-owned: the account
+# cannot change its own restrictions. Each key can only run the dispatcher
+# (command=), with no shell, pty, forwarding or file transfer (restrict).
+restrict,from="{{ agent_access_from }}",command="/usr/local/sbin/homelab-agent-ctl --tier read" {{ agent_access_read_key | trim }}
+{% if agent_access_act_enabled | bool and agent_access_act_key | trim | length > 0 %}
+restrict,from="{{ agent_access_from }}",command="/usr/local/sbin/homelab-agent-ctl --tier act" {{ agent_access_act_key | trim }}
+{% endif %}
