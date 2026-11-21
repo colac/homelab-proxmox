@@ -31,6 +31,6 @@ auth-access:
 {% endfor %}
 
 auth-tokens:
-{% for client in ntfy_clients %}
-  - "{{ client.name }}:{{ _ntfy_tokens[client.name] }}:ansible"
+{% for client in ntfy_clients if client.name in ntfy_tokens %}
+  - "{{ client.name }}:{{ ntfy_tokens[client.name] }}:ansible"
 {% endfor %}

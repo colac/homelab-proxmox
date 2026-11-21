@@ -3,6 +3,9 @@
 #
 #   .mise/sops-exec <profile> <command> [args...]   # what the mise tasks call
 #   .mise/sops-exec --check <profile>               # names missing keys, prints no values
+#   .mise/sops-exec --generate <profile> [key...]   # creates the profile's generated
+#                                                   # keys that are missing; a named
+#                                                   # key is replaced. Names only.
 #
 # Decrypts a SOPS file into this process only, exports the subset <profile>
 # needs under the names its tool reads, then execs the command. Nothing lands
@@ -14,27 +17,37 @@
 # `eval` would re-parse the plaintext as shell, and any value with a space,
 # quote or `$` would break or be word-split.
 #
-# Profiles in this repo: packer, terraform, dns, truenas.
+# Generated keys (`generate` below) are credentials no human chooses, such as
+# tokens between two machines. --generate makes them from /dev/urandom and
+# writes them with `sops set --value-stdin`, so a value is never on a
+# command line, on disk unencrypted, or on the screen.
+#
+# Profiles in this repo: packer, terraform, dns, ntfy, truenas.
 # The same script, with different profiles, lives in each homelab repo.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 check=false
-if [[ ${1:-} == --check ]]; then
-  check=true
-  shift
-fi
-profile=${1:?usage: sops-exec [--check] <profile> [command...]}
+generate=false
+case ${1:-} in
+  --check) check=true; shift ;;
+  --generate) generate=true; shift ;;
+esac
+profile=${1:?usage: sops-exec [--check|--generate] <profile> [command...|key...]}
 shift
 
 declare -A S=()
+declare -A G=()  # generated key -> kind
+generated=()     # the same keys, in order
 missing=()
 empty_optional=()
+loaded=""
 
 # load FILE — decrypt into S. Never to disk, never to stdout.
 load() {
   local file=$1 out line
+  loaded=$file
   if [[ ! -f $file ]]; then
     echo "sops-exec: ${file#"$root"/} not found. Create it from ${file##*/}.example: sops ${file#"$root"/}" >&2
     exit 1
@@ -59,6 +72,28 @@ need() {
 want() {
   local k
   for k; do [[ -n ${S[$k]:-} ]] || empty_optional+=("$k"); done
+}
+
+# generate KIND KEY... — required, like need, but created by --generate
+# instead of typed. KIND: secret (32 letters and digits) or ntfy-token.
+generate() {
+  local kind=$1 k
+  shift
+  for k; do
+    G[$k]=$kind
+    generated+=("$k")
+  done
+  need "$@"
+}
+
+# random CHARS LENGTH — LENGTH characters from the tr set CHARS. Reads a
+# fixed amount, so no pipe is closed early (pipefail).
+random() {
+  local s=""
+  while ((${#s} < $2)); do
+    s+=$(head -c 1024 /dev/urandom | LC_ALL=C tr -dc "$1")
+  done
+  printf '%s' "${s:0:$2}"
 }
 
 # put VAR KEY — export VAR with the value of secret KEY.
@@ -119,6 +154,20 @@ case $profile in
     put DNS_ZONE dns_zone
     put PIHOLE_WEB_PASSWORD pihole_web_password
     ;;
+  ntfy)
+    # The Pi's notification services (dns/NTFY.md), from the same
+    # dns/secrets.yaml; Pi-hole's keys stay out. All generated. Read back by
+    # lookup('env', …) in dns/ansible/inventory/group_vars/ntfy.yml.
+    load "$root/dns/secrets.yaml"
+    generate secret ntfy_phone_password ntfy_doorbell_topic
+    generate ntfy-token ntfy_actions_token ntfy_notifier_token ntfy_runner_token ntfy_doorbell_token
+    put NTFY_PHONE_PASSWORD ntfy_phone_password
+    put NTFY_DOORBELL_TOPIC ntfy_doorbell_topic
+    put NTFY_ACTIONS_TOKEN ntfy_actions_token
+    put NTFY_NOTIFIER_TOKEN ntfy_notifier_token
+    put NTFY_RUNNER_TOKEN ntfy_runner_token
+    put NTFY_DOORBELL_TOKEN ntfy_doorbell_token
+    ;;
   truenas)
     # The web UI's certificate, from TrueNAS/secrets.yaml. Read back by
     # lookup('env', …) in TrueNAS/ansible/inventory/group_vars/truenas.yml.
@@ -128,15 +177,63 @@ case $profile in
     put CLOUDFLARE_DNS_API_TOKEN cloudflare_dns_api_token
     ;;
   *)
-    echo "sops-exec: unknown profile '$profile' (this repo has: packer, terraform, dns, truenas)" >&2
+    echo "sops-exec: unknown profile '$profile' (this repo has: packer, terraform, dns, ntfy, truenas)" >&2
     exit 2
     ;;
 esac
 
+if $generate; then
+  if ((!${#generated[@]})); then
+    echo "sops-exec: profile $profile has no generated keys" >&2
+    exit 2
+  fi
+  declare -A replace=()
+  for k; do
+    if [[ -z ${G[$k]:-} ]]; then
+      echo "sops-exec: $k is not a generated key of profile $profile (${generated[*]})" >&2
+      exit 2
+    fi
+    replace[$k]=1
+  done
+  made=0
+  for k in "${generated[@]}"; do
+    if [[ -n ${S[$k]:-} && ${S[$k]} != CHANGE_ME && -z ${replace[$k]:-} ]]; then
+      continue
+    fi
+    verb=generated
+    [[ -n ${replace[$k]:-} ]] && verb=replaced
+    case ${G[$k]} in
+      secret) v=$(random 'A-Za-z0-9' 32) ;;
+      ntfy-token) v=tk_$(random 'a-z0-9' 29) ;; # the format ntfy provisions
+    esac
+    # The value is JSON for sops set. printf is a builtin, so the value
+    # never appears in the process list.
+    printf '"%s"' "$v" | sops set --value-stdin "$loaded" "[\"$k\"]"
+    echo "sops-exec: $verb $k in ${loaded#"$root"/}"
+    made=$((made + 1))
+  done
+  if ((made)); then
+    echo "Commit ${loaded#"$root"/}, then run the plays that use these keys."
+  else
+    echo "sops-exec: profile $profile has every generated key. To replace one: mise run secrets:generate <key>"
+  fi
+  exit 0
+fi
+
 if ((${#missing[@]})); then
   printf 'sops-exec: profile %s is missing:\n' "$profile" >&2
   printf '  - %s\n' "${missing[@]}" >&2
-  echo "Set them with: mise run secrets:edit (keys are listed in the matching secrets.yaml.example)" >&2
+  typed=false
+  made_here=false
+  for k in "${missing[@]}"; do
+    if [[ -n ${G[$k]:-} ]]; then made_here=true; else typed=true; fi
+  done
+  if $typed; then
+    echo "Set them with: mise run secrets:edit (keys are listed in the matching secrets.yaml.example)" >&2
+  fi
+  if $made_here; then
+    echo "Generate them with: mise run secrets:generate (never typed)" >&2
+  fi
   exit 1
 fi
 

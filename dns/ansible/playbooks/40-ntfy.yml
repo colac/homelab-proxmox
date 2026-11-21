@@ -1,7 +1,7 @@
 ---
 # The Pi's notification services, 2 of 3: the private ntfy server. Users,
-# access rules and tokens from group_vars/ntfy.yml; credentials generated
-# into ../.secrets-cache/.
+# access rules from group_vars/ntfy.yml; credentials from ../../secrets.yaml
+# (`mise run secrets:generate` makes them).
 #
 #   mise run dns:play:ntfy playbooks/40-ntfy.yml --check --diff
 - name: Private ntfy

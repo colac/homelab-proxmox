@@ -7,9 +7,27 @@
 #   with the `ntfy user` CLI: the CLI needs a database that only exists
 #   after the first start, and declared entries are idempotent (ntfy
 #   provisions them at every start, and deletes the ones removed here).
-# - Credentials are generated on the controller, into
-#   ntfy_secrets_local_cache_dir, never typed and never in sops. The Pi keeps
-#   only bcrypt hashes of the passwords; tokens must be in server.yml.
+# - Credentials come from dns/secrets.yaml (ntfy_passwords, ntfy_tokens in
+#   group_vars/ntfy.yml), generated there by `mise run secrets:generate`.
+#   The Pi keeps only bcrypt hashes of the passwords; tokens must be in
+#   server.yml.
+
+# Without them (ansible-playbook run directly, not through mise) the play
+# would provision empty tokens.
+- name: Check the credentials came with the play (mise run dns:play:ntfy)
+  ansible.builtin.assert:
+    that:
+      - ntfy_clients | map(attribute='name') | reject('in', ntfy_tokens) | reject('in', ntfy_passwords) | list | length == 0
+      - ntfy_clients | selectattr('local', 'defined') | selectattr('local') | map(attribute='name') | reject('in', ntfy_tokens) | list | length == 0
+      - ntfy_tokens.values() | reject('match', '^tk_[a-z0-9]{29}$') | list | length == 0
+      - ntfy_passwords.values() | reject('match', '^[A-Za-z0-9]{16,}$') | list | length == 0
+    fail_msg: >-
+      ntfy's credentials are missing or malformed. They come from
+      dns/secrets.yaml: run `mise run secrets:generate` once, then this play
+      through `mise run dns:play:ntfy`. Every client in ntfy_clients needs a
+      token (ntfy_tokens) or a password (ntfy_passwords); a `local` client
+      needs a token.
+    quiet: true
 
 - name: Map the CPU to ntfy's package architecture
   ansible.builtin.set_fact:
@@ -51,63 +69,6 @@
 - name: Decide whether the rest can run
   ansible.builtin.set_fact:
     _ntfy_present: "{{ not ansible_check_mode or _ntfy_installed.stdout | length > 0 }}"
-
-# ---------------------------------------------------------------------------
-# Credentials, generated on the controller
-# ---------------------------------------------------------------------------
-
-- name: Create the cache for generated credentials (controller)
-  ansible.builtin.file:
-    path: "{{ ntfy_secrets_local_cache_dir }}"
-    state: directory
-    mode: "0700"
-  delegate_to: localhost
-  become: false
-  run_once: true
-  # Writes only to the controller's git-ignored cache, so --check can read
-  # the values back below.
-  check_mode: false
-
-- name: Generate missing passwords (controller)
-  ansible.builtin.copy:
-    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-{{ item.name }}.password"
-    content: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=32) }}"
-    mode: "0600"
-    force: false
-  loop: "{{ ntfy_clients }}"
-  loop_control:
-    label: "{{ item.name }}"
-  delegate_to: localhost
-  become: false
-  run_once: true
-  check_mode: false
-  no_log: true
-
-# ntfy tokens: "tk_" and 29 characters, 32 in all.
-- name: Generate missing tokens (controller)
-  ansible.builtin.copy:
-    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-{{ item.name }}.token"
-    content: "tk_{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=29) }}"
-    mode: "0600"
-    force: false
-  loop: "{{ ntfy_clients }}"
-  loop_control:
-    label: "{{ item.name }}"
-  delegate_to: localhost
-  become: false
-  run_once: true
-  check_mode: false
-  no_log: true
-
-- name: Read the tokens
-  ansible.builtin.set_fact:
-    _ntfy_tokens: >-
-      {{ _ntfy_tokens | default({}) | combine({item.name:
-           lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-' ~ item.name ~ '.token')}) }}
-  loop: "{{ ntfy_clients }}"
-  loop_control:
-    label: "{{ item.name }}"
-  no_log: true
 
 # ---------------------------------------------------------------------------
 # The server's public name: the host's tailnet name (30-tailscale.yml)
@@ -171,7 +132,10 @@
 
     # bcrypt hashes are salted, so hashing every run would rewrite server.yml
     # every run. A hash is made again only when its password changed, which
-    # the stored sha256 of the password tells.
+    # the stored sha256 of the password tells. A client without a password
+    # (it uses its token) gets a random one, made here and thrown away once
+    # hashed: nobody holds it. Its .sum says `random`, so a hash of a
+    # password that someone did hold is replaced.
     - name: Hash each client's password (only when it changed)
       ansible.builtin.shell:
         executable: /bin/bash
@@ -179,23 +143,27 @@
           set -euo pipefail
           umask 077
           dir=/etc/ntfy/provisioned
-          if [[ -s $dir/$NTFY_CLIENT.hash && "$(cat "$dir/$NTFY_CLIENT.sum" 2>/dev/null)" == "$NTFY_SUM" ]]; then
+          sum=${NTFY_SUM:-random}
+          if [[ -s $dir/$NTFY_CLIENT.hash && "$(cat "$dir/$NTFY_CLIENT.sum" 2>/dev/null)" == "$sum" ]]; then
             echo unchanged
             exit 0
           fi
+          if [[ -z $NTFY_PASSWORD ]]; then
+            NTFY_PASSWORD=$(head -c 24 /dev/urandom | base64)
+          fi
           printf '%s\n%s\n' "$NTFY_PASSWORD" "$NTFY_PASSWORD" | ntfy user hash >"$dir/$NTFY_CLIENT.hash.new" 2>/dev/null
           mv "$dir/$NTFY_CLIENT.hash.new" "$dir/$NTFY_CLIENT.hash"
-          printf '%s' "$NTFY_SUM" >"$dir/$NTFY_CLIENT.sum"
+          printf '%s' "$sum" >"$dir/$NTFY_CLIENT.sum"
           echo hashed
       environment:
         NTFY_CLIENT: "{{ item.name }}"
-        NTFY_PASSWORD: "{{ lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-' ~ item.name ~ '.password') }}"
-        NTFY_SUM: "{{ lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-' ~ item.name ~ '.password') | hash('sha256') }}"
+        NTFY_PASSWORD: "{{ ntfy_passwords[item.name] | default('') }}"
+        NTFY_SUM: "{{ (ntfy_passwords[item.name] | hash('sha256')) if item.name in ntfy_passwords else '' }}"
       loop: "{{ ntfy_clients }}"
       loop_control:
         label: "{{ item.name }}"
       register: _ntfy_hash
-      changed_when: "'hashed' in _ntfy_hash.stdout"
+      changed_when: "'hashed' in (_ntfy_hash.stdout | default(''))"
       no_log: true
 
     - name: Read the password hashes
@@ -233,7 +201,7 @@
     - name: Leave the tokens of this host's own services here (read with LoadCredential)
       ansible.builtin.copy:
         dest: "/etc/ntfy/clients/{{ item.name }}.token"
-        content: "{{ _ntfy_tokens[item.name] }}\n"
+        content: "{{ ntfy_tokens[item.name] }}\n"
         owner: root
         group: root
         mode: "0600"
@@ -282,16 +250,13 @@
     - name: Apply configuration changes now
       ansible.builtin.meta: flush_handlers
 
-# The base URL and the tokens the laptop needs, for monitoring's
-# `mise run agent install` (it reads them from this checkout).
-- name: Cache the server's address (controller)
-  ansible.builtin.copy:
-    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-base-url"
-    content: "{{ _ntfy_base_url }}\n"
-    mode: "0600"
-  delegate_to: localhost
-  become: false
-  check_mode: false
+# Not a secret, but kept out of the repos: the Pi's tailnet name is in
+# public certificate transparency logs. The phone needs it (NTFY.md);
+# monitoring's `mise run agent install` finds it through the laptop's own
+# Tailscale.
+- name: Show the server's address
+  ansible.builtin.debug:
+    msg: "The private ntfy is at {{ _ntfy_base_url }} (the server for the phone, dns/NTFY.md)."
 
 # ---------------------------------------------------------------------------
 # Prove it: up, closed to strangers, open to a token
@@ -314,11 +279,13 @@
         url: "http://127.0.0.1:{{ ntfy_port }}/{{ ntfy_topics.alerts }}/json?poll=1"
         status_code: [401, 403]
 
-    - name: Each token reaches the topics it may read
+    - name: Each client reaches the topics it may read (token, or the phone's password)
       ansible.builtin.uri:
         url: "http://127.0.0.1:{{ ntfy_port }}/{{ item.1 | regex_replace(':.*$', '') }}/json?poll=1"
         headers:
-          Authorization: "Bearer {{ _ntfy_tokens[item.0.name] }}"
+          Authorization: >-
+            {{ ('Bearer ' ~ ntfy_tokens[item.0.name]) if item.0.name in ntfy_tokens
+               else ('Basic ' ~ (item.0.name ~ ':' ~ ntfy_passwords[item.0.name]) | b64encode) }}
         status_code: 200
       loop: "{{ ntfy_clients | subelements('access') }}"
       loop_control:

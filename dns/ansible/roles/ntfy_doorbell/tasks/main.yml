@@ -2,6 +2,17 @@
 # The doorbell service (files/doorbell.py explains the rules). Needs the ntfy
 # role first: it reads the doorbell's token from /etc/ntfy/clients/.
 
+# The topic on ntfy.sh is the doorbell's only protection: anyone who knows
+# it can ring. From dns/secrets.yaml (group_vars/ntfy.yml), generated there.
+- name: Check the doorbell topic came with the play (mise run dns:play:ntfy)
+  ansible.builtin.assert:
+    that: ntfy_doorbell_topic is match('^[A-Za-z0-9]{16,64}$')
+    fail_msg: >-
+      ntfy_doorbell_topic is missing or malformed. It comes from
+      dns/secrets.yaml: run `mise run secrets:generate` once, then this play
+      through `mise run dns:play:ntfy`.
+    quiet: true
+
 - name: Check that the ntfy role has run (playbooks/40-ntfy.yml)
   ansible.builtin.stat:
     path: /etc/ntfy/clients/doorbell.token
@@ -27,24 +38,10 @@
     fail_msg: "/etc/ntfy/clients/doorbell.token is missing: run playbooks/40-ntfy.yml first."
     quiet: true
 
-# The topic on ntfy.sh is the doorbell's only protection: anyone who knows
-# it can ring. 32 random characters, generated like the ntfy credentials.
-- name: Generate the doorbell topic if missing (controller)
-  ansible.builtin.copy:
-    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-doorbell-topic"
-    content: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=32) }}"
-    mode: "0600"
-    force: false
-  delegate_to: localhost
-  become: false
-  run_once: true
-  check_mode: false
-  no_log: true
-
 - name: Leave the doorbell topic here (read with LoadCredential)
   ansible.builtin.copy:
     dest: /etc/ntfy/clients/doorbell.topic
-    content: "{{ lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-doorbell-topic') }}\n"
+    content: "{{ ntfy_doorbell_topic }}\n"
     owner: root
     group: root
     mode: "0600"

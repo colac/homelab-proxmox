@@ -27,8 +27,8 @@ mise run dns:inventory      # no credentials
 ```
 
 Need credentials — ask the human first: `mise run dns:plan`, `dns:apply`,
-`dns:tf …`, `dns:play …`. No credentials, but it reaches a live machine — ask
-first too: `mise run dns:play:ntfy …`.
+`dns:tf …`, `dns:play …`, `dns:play:ntfy …`, and `mise run secrets:generate`
+(it writes the ntfy keys into `dns/secrets.yaml`).
 
 ## Deliberate decisions — do not "fix"
 
@@ -60,8 +60,12 @@ breaks DNS for every device.
 - **Never Tailscale Funnel**, never a port forward: ntfy is reachable from
   the tailnet only. The tailscale role stops if Funnel is on.
 - **`--accept-dns=false` stays**: the resolver keeps its own resolv.conf.
-- **Never read `ansible/.secrets-cache/`**: generated ntfy passwords and
-  tokens, and the doorbell topic. Refer to the files by name.
+- **The ntfy credentials are generated, never typed**: the phone's
+  password, the doorbell topic and the tokens are in `dns/secrets.yaml`
+  (key names in `secrets.yaml.example`), made by `mise run secrets:generate`.
+  Only the phone has a password; never add one for a client that can use a
+  token. `ansible/.secrets-cache/` is the old plaintext location: never read
+  it.
 - **The doorbell carries nothing but its fixed text and a priority.** Alert
   content goes to the private server only.
 - Topic names and the files under `/etc/ntfy/clients/` are a contract with

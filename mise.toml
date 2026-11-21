@@ -96,8 +96,15 @@ run = [
   ".mise/sops-exec --check packer",
   ".mise/sops-exec --check terraform",
   ".mise/sops-exec --check dns",
+  ".mise/sops-exec --check ntfy",
   ".mise/sops-exec --check truenas",
 ]
+
+[tasks."secrets:generate"]
+description = "Create the generated credentials that are missing (ntfy's, in dns/secrets.yaml); name one to replace it: mise run secrets:generate ntfy_runner_token"
+# Random values written with `sops set`; prints key names only. The profile
+# lists which keys are generated.
+run = ".mise/sops-exec --generate ntfy"
 
 # --------------------------------------------------------------------------
 # DNS (dns/), two deployments sharing one inventory:
@@ -105,8 +112,8 @@ run = [
 #   platform service: everything else resolves through it, Packer and
 #   Terraform included. dns:tf/plan/apply (the container) and dns:play.
 # - The Pi's notification services: Tailscale, the private ntfy, the
-#   doorbell. dns:play:ntfy. No secrets: SSH keys only; the ntfy
-#   credentials are generated into dns/ansible/.secrets-cache/.
+#   doorbell. dns:play:ntfy, with the ntfy credentials from the same
+#   dns/secrets.yaml (sops-exec profile ntfy), made by secrets:generate.
 # --------------------------------------------------------------------------
 [tasks."dns:tf"]
 description = "Any terraform command for the Pi-hole container: mise run dns:tf state list"
@@ -139,11 +146,11 @@ env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
 run = "ansible-inventory --graph"
 
 [tasks."dns:play:ntfy"]
-description = "ansible-playbook for the Pi's notification services, no secrets; playbooks/ntfy.yml unless a playbook is named: mise run dns:play:ntfy --check --diff"
+description = "ansible-playbook for the Pi's notification services with their credentials; playbooks/ntfy.yml unless a playbook is named: mise run dns:play:ntfy --check --diff"
 dir = "{{config_root}}/dns/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
-# Same argument handling as truenas:play.
-run = """bash -c 'for a in "$@"; do case "$a" in *.yml|*.yaml) [ -f "$a" ] && exec ansible-playbook "$@";; esac; done; exec ansible-playbook playbooks/ntfy.yml "$@"' dns:play:ntfy"""
+# Same argument handling as truenas:play, inside the ntfy profile.
+run = """{{config_root}}/.mise/sops-exec ntfy bash -c 'for a in "$@"; do case "$a" in *.yml|*.yaml) [ -f "$a" ] && exec ansible-playbook "$@";; esac; done; exec ansible-playbook playbooks/ntfy.yml "$@"' dns:play:ntfy"""
 
 # --------------------------------------------------------------------------
 # TrueNAS — users, shares, snapshot and backup tasks, settings, through its

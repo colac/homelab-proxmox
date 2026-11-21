@@ -20,12 +20,16 @@ Monitoring's alert notifier also runs on the Pi, deployed from that repo.
 
 ## Run it
 
-No secrets: SSH keys only. Every credential is generated on the first run
-into `dns/ansible/.secrets-cache/` (git-ignored). The Pi is already in
-`dns/ansible/inventory/hosts.yml` for Pi-hole; add the `ntfy` group with the
-phone's tailnet name, as `hosts.yml.example` shows.
+The credentials are in `dns/secrets.yaml`, next to Pi-hole's, and nobody
+types them: `mise run secrets:generate` creates them with random values
+(the phone's password, the doorbell topic, one token per other client) and
+prints only their names. The play gets only these keys (`.mise/sops-exec`
+profile `ntfy`). The Pi is already in `dns/ansible/inventory/hosts.yml` for
+Pi-hole; add the `ntfy` group with the phone's tailnet name, as
+`hosts.yml.example` shows.
 
 ```bash
+mise run secrets:generate            # once; commit dns/secrets.yaml
 mise run dns:inventory               # pihole-pi in both groups, pihole and ntfy
 mise run dns:play:ntfy --check --diff
 mise run dns:play:ntfy
@@ -43,7 +47,8 @@ The first run stops twice, on purpose, with the command to run:
    the URL stays out of the repos.
 
 The play ends by checking that ntfy answers, that a request without a
-token is refused, and that every token reaches the topics it may read.
+token is refused, and that every client reaches the topics it may read. Its
+last message is the server's address, which the phone needs.
 
 ## Topics and who may use them
 
@@ -57,7 +62,8 @@ Declared in [group_vars/ntfy.yml](ansible/inventory/group_vars/ntfy.yml)
 | `homelab-control` | `actions` (the token the phone's buttons send) | `runner` |
 
 Every other access is refused (`auth-default-access: deny-all`). Signup is
-off. Only `phone` logs in with a password; the others use tokens.
+off. Only `phone` logs in with a password; the others use tokens, and their
+passwords are random ones the Pi makes and throws away once hashed.
 
 ## Set up the phone (Android)
 
@@ -65,13 +71,15 @@ off. Only `phone` logs in with a password; the others use tokens.
    ntfy.sh topics through Firebase, which is what makes the doorbell arrive
    while another VPN is on). Settings → Apps → ntfy → Battery:
    **Unrestricted**.
-2. Subscribe to the doorbell on the default server (ntfy.sh). The topic
-   name is in `dns/ansible/.secrets-cache/ntfy-doorbell-topic`.
-3. Turn Tailscale on. In ntfy: Settings → Users → Add user: the server is
-   the URL in `dns/ansible/.secrets-cache/ntfy-base-url`, the user `phone`,
-   the password in `dns/ansible/.secrets-cache/ntfy-phone.password`.
-4. Subscribe to `homelab-alerts` and `homelab-agent`, choosing "use another
-   server" with that same URL.
+2. Open the values: `mise run secrets:edit dns` shows `ntfy_doorbell_topic`
+   and `ntfy_phone_password`; close it without saving.
+3. Subscribe to the doorbell on the default server (ntfy.sh): the topic is
+   `ntfy_doorbell_topic`.
+4. Turn Tailscale on. In ntfy: Settings → Users → Add user: the server is
+   the address the play printed last (`https://pihole-pi.<tailnet>.ts.net:8443`),
+   the user `phone`, the password `ntfy_phone_password`.
+5. Subscribe to `homelab-alerts` and `homelab-agent`, choosing "use another
+   server" with that same address.
 
 With another VPN on, the doorbell arrives; switch to Tailscale and the
 private messages arrive with their buttons. The server keeps 72 hours of
@@ -80,13 +88,12 @@ messages, so nothing is lost while Tailscale is off.
 ## Test it
 
 From the laptop, with Tailscale on (a test alert, through the notifier's
-token):
+token; the address is the one the play printed):
 
 ```bash
-cd dns/ansible/.secrets-cache
-curl -H "Authorization: Bearer $(cat ntfy-notifier.token)" \
+curl -H "Authorization: Bearer $(sops -d --extract '["ntfy_notifier_token"]' dns/secrets.yaml)" \
      -H "Priority: 4" -H "Title: Test alert" -d "Sent from the laptop" \
-     "$(cat ntfy-base-url)/homelab-alerts"
+     "https://pihole-pi.<tailnet>.ts.net:8443/homelab-alerts"
 ```
 
 With the phone on Tailscale, the message arrives and the doorbell stays
@@ -107,23 +114,29 @@ On the Pi (monitoring's alert notifier reads these with systemd
   (root, 0600);
 - `/etc/ntfy/base-url`: the tailnet URL, for buttons the phone sends.
 
-On the controller, for monitoring's `mise run agent install` (it reads the
-sibling checkout): `dns/ansible/.secrets-cache/ntfy-base-url`,
-`ntfy-runner.token` and `ntfy-actions.token`.
+On the laptop, for monitoring's `mise run agent install`: the keys
+`ntfy_runner_token` and `ntfy_actions_token` in this checkout's
+`dns/secrets.yaml` (it decrypts those two), and the Pi as `pihole-pi` on the
+tailnet, serving on port 8443 (it finds the address in the laptop's
+`tailscale status`).
 
 The topic names are the contract with monitoring's notifier and runner;
 rename them in both repos together.
 
 ## Rotate a credential
 
-Delete its file in `dns/ansible/.secrets-cache/` (`ntfy-<client>.token`,
-`ntfy-<client>.password`, `ntfy-doorbell-topic`) and run
-`mise run dns:play:ntfy`.
-Then give the new value to whoever uses it: the phone's password or doorbell
-subscription; `mise run agent install` in monitoring for the `runner` and
-`actions` tokens (it re-reads them from this checkout); monitoring's
-notifier play for `notifier` and `actions` on the Pi (its service reads
-them at every start, so a restart is enough).
+Name the key: `mise run secrets:generate ntfy_runner_token` (any of the
+six in `dns/secrets.yaml.example`; several at once is fine). It replaces the
+value, prints only the name, and you commit `dns/secrets.yaml`. Then run
+`mise run dns:play:ntfy` and give the new value to whoever uses it: the
+phone's password or doorbell subscription; `mise run agent install` in
+monitoring for the `runner` and `actions` tokens (it re-reads them from
+this checkout); monitoring's notifier play for `notifier` and `actions` on
+the Pi (its service reads them at every start, so a restart is enough).
+
+Before 2026-11-21 the play kept these values in plaintext in
+`dns/ansible/.secrets-cache/`. That folder is no longer read: delete it.
+Values generated since then exist only in `dns/secrets.yaml`, encrypted.
 
 ## Not yet
 

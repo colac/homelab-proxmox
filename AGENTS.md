@@ -59,10 +59,10 @@ mise run secrets:check                            # missing key names only
 
 Need credentials — ask the human first: `mise run packer:validate <release>`,
 `mise run packer:build <release>`, every `mise run dns:*` except
-`dns:inventory` and `dns:play:ntfy`, and `mise run truenas:certificate`. No
-credentials, but they reach live machines — ask first too: `mise run update`,
-`mise run update:apply`, `mise run dns:play:ntfy`, and every other
-`mise run truenas:*` except `truenas:inventory`.
+`dns:inventory`, `mise run secrets:generate`, and
+`mise run truenas:certificate`. No credentials, but they reach live
+machines — ask first too: `mise run update`, `mise run update:apply`, and
+every other `mise run truenas:*` except `truenas:inventory`.
 
 ## Rules
 

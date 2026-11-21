@@ -6,11 +6,19 @@
 # The design and its reasons: homelab-proxmox-monitoring's
 # docs/ai-ops/architecture.md (Notifications; decisions D1, D2).
 
-# Generated credentials (ntfy passwords and tokens, the doorbell topic) are
-# machine state, not human-chosen secrets: created on the first run, kept
-# on the controller in dns/ansible/.secrets-cache/, git-ignored. Delete a
-# file to rotate it.
-ntfy_secrets_local_cache_dir: "{{ playbook_dir }}/../.secrets-cache"
+# The credentials, from dns/secrets.yaml: made by `mise run
+# secrets:generate` (never typed; naming a key there replaces it), passed to
+# one `mise run dns:play:ntfy` by .mise/sops-exec's ntfy profile. Only the
+# phone logs in with a password; every other client uses its token, and its
+# password is a random one the Pi makes and throws away once hashed.
+ntfy_passwords:
+  phone: "{{ lookup('env', 'NTFY_PHONE_PASSWORD') }}"
+ntfy_tokens:
+  actions: "{{ lookup('env', 'NTFY_ACTIONS_TOKEN') }}"
+  notifier: "{{ lookup('env', 'NTFY_NOTIFIER_TOKEN') }}"
+  runner: "{{ lookup('env', 'NTFY_RUNNER_TOKEN') }}"
+  doorbell: "{{ lookup('env', 'NTFY_DOORBELL_TOKEN') }}"
+ntfy_doorbell_topic: "{{ lookup('env', 'NTFY_DOORBELL_TOPIC') }}"
 
 # ntfy listens on loopback only. `tailscale serve` publishes it to the
 # tailnet, over HTTPS, on ntfy_https_port. Nothing else reaches it.
@@ -22,11 +30,10 @@ ntfy_topics:
   agent: homelab-agent      # the investigation runner -> phone
   control: homelab-control  # the phone's buttons -> runner
 
-# Who may do what on the private server. Every client gets a generated
-# password and token; only the phone logs in with its password, the others
-# use their token. `local: true` leaves the token on this host for a service
-# here, at /etc/ntfy/clients/<name>.token (root, 0600), which its systemd
-# unit reads with LoadCredential.
+# Who may do what on the private server. Each client needs a token in
+# ntfy_tokens or a password in ntfy_passwords. `local: true` leaves the
+# token on this host for a service here, at /etc/ntfy/clients/<name>.token
+# (root, 0600), which its systemd unit reads with LoadCredential.
 ntfy_clients:
   - name: phone
     access:

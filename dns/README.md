@@ -5,7 +5,7 @@
 | Deployment | Hosts (Ansible group) | What | Run | Runbook |
 |---|---|---|---|---|
 | **Pi-hole** | `pihole`: `pihole-pi` and `pihole-ct` | The LAN's resolvers, with identical configuration | `mise run dns:play playbooks/site.yml` (reads `dns/secrets.yaml`) | this page |
-| **Notification services** | `ntfy`: `pihole-pi` only | Tailscale, the private ntfy server and the doorbell: how alerts reach the phone and Claude | `mise run dns:play:ntfy` (no secrets) | [NTFY.md](NTFY.md) |
+| **Notification services** | `ntfy`: `pihole-pi` only | Tailscale, the private ntfy server and the doorbell: how alerts reach the phone and Claude | `mise run dns:play:ntfy` (reads `dns/secrets.yaml`'s ntfy keys) | [NTFY.md](NTFY.md) |
 
 They live together because they share a machine: the Raspberry Pi is the
 one host that does not fail with the Proxmox node, so it carries both DNS

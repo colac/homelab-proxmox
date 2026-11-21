@@ -49,8 +49,8 @@ dns/ansible/inventory/pihole.yml
 # dns/ — hand-authored hosts outside Terraform (the Raspberry Pi): addresses,
 # and the phone's tailnet name for the doorbell.
 dns/ansible/inventory/hosts.yml
-# dns/ — the ntfy credentials and doorbell topic dns:play:ntfy generates
-# (machine state).
+# dns/ — where dns:play:ntfy kept the ntfy credentials before they moved to
+# dns/secrets.yaml. Ignored until the old copy is deleted.
 dns/ansible/.secrets-cache/
 # updates/ — machine state (addresses, VM IDs) and the reports it writes.
 updates/inventory/hosts.yml
