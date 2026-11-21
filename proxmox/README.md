@@ -23,16 +23,22 @@ together.
 The lists were taken from the live node (`pveum role list`, `pveum acl list`)
 on 2026-10-08, so a `--check` run against it should report everything in sync.
 
-- **Roles** `PackerProv`, `TerraformRole`, `McpReadOnlyRole`. A drifted role
+- **Roles** `PackerProv`, `TerraformRole`, `AgentReadRole`, `AgentPowerRole`. A drifted role
   is reported with its live and declared privileges, then set to exactly the
   declared list.
-- **Users** `packer@pve`, `terraform@pve`, `terraform-core@pve`, `mcp@pve`,
-  each with its one ACL on `/`, and `pve-exporter@pve` (`PVEAuditor`) only
-  with `ENABLE_PVE_EXPORTER=1`. New users get no password; they use API
-  tokens.
+- **Users** `packer@pve`, `terraform@pve`, `terraform-core@pve`,
+  `homelab-agent@pve`, each with its ACL on `/`, and `pve-exporter@pve`
+  (`PVEAuditor`) only with `ENABLE_PVE_EXPORTER=1`. New users get no
+  password; they use API tokens.
+- **The AI agent** `homelab-agent@pve` (it replaces `mcp@pve`, which the
+  script reports but never deletes): read everything including the node's
+  journal (`AgentReadRole`), and power management only on the VMs named in
+  `AGENT_POWER_VMS` (default `monitoring nextcloud`; `AgentPowerRole`).
+  Its tokens `mcp`, `runner` and `power` have privilege separation, so each
+  holds only its own ACLs, and expire after a year.
 - **Tokens** `packer-automation`, `terraform-automation`,
-  `terraform-automation-core`, `mcp` are created when missing and their secret
-  printed **once** — store it where CREDENTIALS.md says straight away. A token
+  `terraform-automation-core`, and the agent's `mcp`, `runner` and `power`
+  are created when missing and their secret printed **once** — store it where CREDENTIALS.md says straight away. A token
   reported missing lists the tokens the user does have, so a renamed one is
   easy to spot before you create a duplicate. Existing tokens are
   never regenerated; to rotate one, follow CREDENTIALS.md.

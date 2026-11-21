@@ -33,7 +33,12 @@ CHECK=0
 ROLES=(
     "PackerProv|Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit SDN.Use Sys.Modify VM.Allocate VM.Audit VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt"
     "TerraformRole|Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Allocate Pool.Audit SDN.Use Sys.Audit Sys.Console Sys.Modify VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit VM.Migrate VM.PowerMgmt"
-    "McpReadOnlyRole|Datastore.Audit Pool.Audit Sys.Audit VM.Audit"
+    # The AI agent (homelab-agent@pve): read everything, including the
+    # node's journal; and, on the VMs in AGENT_POWER_VMS only, power
+    # management (start, shutdown, reboot) for approved mitigations. Never
+    # snapshots, backups, rollback, allocation or the node itself.
+    "AgentReadRole|Datastore.Audit Pool.Audit Sys.Audit Sys.Syslog VM.Audit"
+    "AgentPowerRole|VM.Audit VM.PowerMgmt"
 )
 
 # user|role|acl path|comment — the comment is only set when the user is
@@ -42,7 +47,7 @@ USERS=(
     "packer@pve|PackerProv|/|Packer template builds (homelab-proxmox core)"
     "terraform@pve|TerraformRole|/|Terraform: monitoring and workloads repos"
     "terraform-core@pve|TerraformRole|/|Terraform: core dns/ (Pi-hole container)"
-    "mcp@pve|McpReadOnlyRole|/|Read-only MCP access"
+    "homelab-agent@pve|AgentReadRole|/|AI agent: read-only, plus VM power on named VMs (docs/CREDENTIALS.md)"
 )
 
 # user|token id — privsep 0: the token carries its user's permissions.
@@ -50,8 +55,20 @@ TOKENS=(
     "packer@pve|packer-automation"
     "terraform@pve|terraform-automation"
     "terraform-core@pve|terraform-automation-core"
-    "mcp@pve|mcp"
 )
+
+# The AI agent's tokens: privilege separation ON, so each token holds only
+# the ACLs listed here (its effective rights are the intersection with its
+# user's), and they expire after a year. user|token|path:role[ path:role]
+# — the path @vms stands for each VM in AGENT_POWER_VMS.
+AGENT_TOKENS=(
+    "homelab-agent@pve|mcp|/:AgentReadRole"
+    "homelab-agent@pve|runner|/:AgentReadRole"
+    "homelab-agent@pve|power|@vms:AgentPowerRole"
+)
+# VMs an approved mitigation may reboot, by name. Never the node, never
+# TrueNAS. Override: AGENT_POWER_VMS="monitoring" ./configure.sh
+read -r -a AGENT_POWER_VMS <<<"${AGENT_POWER_VMS:-monitoring nextcloud}"
 
 # Optional read-only identity for prometheus-pve-exporter (monitoring repo).
 # Off: the plan is for Proxmox to push metrics itself (OpenTelemetry below).
@@ -171,6 +188,67 @@ ensure_token() {
     fi
 }
 
+# The ids of the named VMs, as /vms/<id> paths. A name not found is reported.
+vm_paths() {
+    local name id
+    for name in "${AGENT_POWER_VMS[@]}"; do
+        id="$(pvesh get /cluster/resources --type vm --output-format json |
+            VM_NAME="$name" perl -MJSON::PP -0777 -ne '
+                print join(" ", map { $_->{vmid} } grep { $_->{name} eq $ENV{VM_NAME} } @{decode_json($_)})')"
+        if [[ -z $id || $id == *" "* ]]; then
+            log "agent power: VM '$name' not found, or not unique (ids: ${id:-none}); skipped" >&2
+            continue
+        fi
+        printf '/vms/%s\n' "$id"
+    done
+}
+
+ensure_acl() {
+    local path="$1" kind="$2" ugid="$3" role="$4"
+    if has_acl "$path" "$ugid" "$role"; then
+        log "$ugid: $role on $path"
+    else
+        log "$ugid: granting $role on $path"
+        run pveum acl modify "$path" "--$kind" "$ugid" --roles "$role"
+    fi
+}
+
+configure_agent() {
+    local entry user token grants grant path role expire existing p
+    local -a paths
+    mapfile -t paths < <(vm_paths)
+    # The user needs every right its separated tokens use.
+    for p in "${paths[@]}"; do
+        ensure_acl "$p" users homelab-agent@pve AgentPowerRole
+    done
+    for entry in "${AGENT_TOKENS[@]}"; do
+        IFS='|' read -r user token grants <<<"$entry"
+        existing=""
+        exists "/access/users/$user" && existing="$(user_tokens "$user")"
+        if [[ " $existing " == *" $token "* ]]; then
+            log "token $user!$token: exists (secret unchanged)"
+        else
+            expire="$(date -d '+1 year' +%s)"
+            log "token $user!$token: missing — creating (privilege separation, expires $(date -d "@$expire" +%F))"
+            [[ $CHECK == 1 ]] || log "copy the secret below NOW, it is not shown again"
+            run pveum user token add "$user" "$token" --privsep 1 --expire "$expire" \
+                --comment "homelab AI agent: see docs/CREDENTIALS.md"
+        fi
+        for grant in $grants; do
+            path="${grant%%:*}" role="${grant#*:}"
+            if [[ $path == @vms ]]; then
+                for p in "${paths[@]}"; do ensure_acl "$p" tokens "$user!$token" "$role"; done
+            else
+                ensure_acl "$path" tokens "$user!$token" "$role"
+            fi
+        done
+    done
+    # Replaced by homelab-agent@pve!mcp. This script never deletes: say so.
+    if exists /access/users/mcp@pve; then
+        log "mcp@pve: no longer declared. Once the MCP client uses homelab-agent@pve!mcp: pveum user delete mcp@pve && pveum role delete McpReadOnlyRole"
+    fi
+}
+
 configure_access() {
     local entry user role path comment token
     if [[ $ENABLE_PVE_EXPORTER == 1 ]]; then
@@ -251,6 +329,7 @@ configure_backup() {
 
 configure_roles
 configure_access
+configure_agent
 configure_downloads
 configure_metrics
 configure_backup
