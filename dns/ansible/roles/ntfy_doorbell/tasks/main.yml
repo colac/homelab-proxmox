@@ -2,15 +2,29 @@
 # The doorbell service (files/doorbell.py explains the rules). Needs the ntfy
 # role first: it reads the doorbell's token from /etc/ntfy/clients/.
 
-- name: Check that the ntfy role has run (playbooks/20-ntfy.yml)
+- name: Check that the ntfy role has run (playbooks/40-ntfy.yml)
   ansible.builtin.stat:
     path: /etc/ntfy/clients/doorbell.token
   register: _ntfy_doorbell_token
 
+# Under --check on a host where ntfy is not configured yet (its play only
+# reports under --check too), there is no token and no /etc/ntfy/clients/.
+- name: Say what --check cannot show before ntfy is configured
+  ansible.builtin.debug:
+    msg: >-
+      ntfy is not configured on this host yet, so the doorbell has no token
+      to use. Run without --check: playbooks/40-ntfy.yml configures ntfy
+      first, then this play shows the rest.
+  when: ansible_check_mode and not _ntfy_doorbell_token.stat.exists
+
+- name: Stop this host's doorbell check here
+  ansible.builtin.meta: end_host
+  when: ansible_check_mode and not _ntfy_doorbell_token.stat.exists
+
 - name: Stop if it has not
   ansible.builtin.assert:
-    that: _ntfy_doorbell_token.stat.exists or ansible_check_mode
-    fail_msg: "/etc/ntfy/clients/doorbell.token is missing: run playbooks/20-ntfy.yml first."
+    that: _ntfy_doorbell_token.stat.exists
+    fail_msg: "/etc/ntfy/clients/doorbell.token is missing: run playbooks/40-ntfy.yml first."
     quiet: true
 
 # The topic on ntfy.sh is the doorbell's only protection: anyone who knows

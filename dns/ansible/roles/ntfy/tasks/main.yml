@@ -110,7 +110,7 @@
   no_log: true
 
 # ---------------------------------------------------------------------------
-# The server's public name: the host's tailnet name (10-tailscale.yml)
+# The server's public name: the host's tailnet name (30-tailscale.yml)
 # ---------------------------------------------------------------------------
 
 - name: Read this host's tailnet name
@@ -120,12 +120,30 @@
   failed_when: false
   check_mode: false
 
-- name: Check that Tailscale is up (playbooks/10-tailscale.yml)
+- name: Note whether Tailscale is up
+  ansible.builtin.set_fact:
+    _ntfy_tailscale_up: >-
+      {{ _ntfy_tailscale.rc == 0
+         and (_ntfy_tailscale.stdout | from_json).BackendState | default('') == 'Running' }}
+
+# Under --check on a host where Tailscale is not set up yet (its play only
+# reports under --check too), there is no address to configure ntfy with.
+- name: Say what --check cannot show before Tailscale is up
+  ansible.builtin.debug:
+    msg: >-
+      Tailscale is not up on this host yet, so ntfy has no address to be
+      configured with. Run without --check: playbooks/30-tailscale.yml sets
+      Tailscale up first, then this play shows the rest.
+  when: ansible_check_mode and not (_ntfy_tailscale_up | bool)
+
+- name: Stop this host's ntfy check here
+  ansible.builtin.meta: end_host
+  when: ansible_check_mode and not (_ntfy_tailscale_up | bool)
+
+- name: Check that Tailscale is up (playbooks/30-tailscale.yml)
   ansible.builtin.assert:
-    that:
-      - _ntfy_tailscale.rc == 0
-      - (_ntfy_tailscale.stdout | from_json).BackendState | default('') == 'Running'
-    fail_msg: "Tailscale is not running on this host: run playbooks/10-tailscale.yml first."
+    that: _ntfy_tailscale_up | bool
+    fail_msg: "Tailscale is not running on this host: run playbooks/30-tailscale.yml first."
     quiet: true
 
 - name: Derive the server's address
