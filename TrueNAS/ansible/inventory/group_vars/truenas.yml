@@ -124,8 +124,10 @@ truenas_settings:
   network.configuration:
     hostname: truenas
     domain: local
-    nameserver1: 192.168.1.153     # the Pi-hole container (core dns/)
-    nameserver2: 192.168.1.1       # the router, while the Pi-hole is down
+    # Pi first: it is physical, so it still answers when Proxmox (and the
+    # container with it) is down, and TrueNAS skips a timeout per lookup.
+    nameserver1: 192.168.1.53      # the Raspberry Pi Pi-hole (core dns/)
+    nameserver2: 192.168.1.153     # the Pi-hole container (core dns/)
   system.general:
     timezone: Europe/Lisbon
     kbdmap: pt
