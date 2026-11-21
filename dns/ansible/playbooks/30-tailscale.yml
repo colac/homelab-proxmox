@@ -1,0 +1,10 @@
+---
+# The Pi's notification services, 1 of 3: Tailscale, logged in, publishing
+# ntfy to the tailnet only (../NTFY.md).
+#
+#   mise run dns:play:ntfy playbooks/30-tailscale.yml --check --diff
+- name: Tailscale
+  hosts: ntfy
+  gather_facts: true
+  roles:
+    - tailscale

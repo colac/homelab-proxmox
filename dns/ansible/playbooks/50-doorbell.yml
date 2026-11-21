@@ -1,0 +1,11 @@
+---
+# The Pi's notification services, 3 of 3: the doorbell. It rings the public
+# ntfy.sh topic, with fixed text, when the private server gets a message
+# that needs the human.
+#
+#   mise run dns:play:ntfy playbooks/50-doorbell.yml --check --diff
+- name: Doorbell
+  hosts: ntfy
+  gather_facts: false
+  roles:
+    - ntfy_doorbell

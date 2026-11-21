@@ -1,0 +1,9 @@
+---
+# The host's name on the tailnet. ntfy's address becomes
+# https://<this>.<tailnet>.ts.net:<ntfy_https_port>.
+tailscale_hostname: "{{ inventory_hostname }}"
+
+# What `tailscale serve` publishes: HTTPS on this port, tailnet only, in
+# front of ntfy on loopback.
+tailscale_serve_https_port: "{{ ntfy_https_port }}"
+tailscale_serve_target: "http://127.0.0.1:{{ ntfy_port }}"

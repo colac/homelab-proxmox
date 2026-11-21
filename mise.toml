@@ -60,7 +60,7 @@ run = ["pre-commit run --all-files", { task = "lint:ansible" }]
 description = "ansible-lint (production profile) on the colac.homelab collection, dns/ansible, TrueNAS/ansible and updates/"
 run = '''
 (cd ansible && ansible-lint)
-(cd dns/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml --syntax-check)
+(cd dns/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml playbooks/ntfy.yml --syntax-check)
 (cd TrueNAS/ansible && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook playbooks/site.yml playbooks/20-backup-usb.yml playbooks/30-update.yml playbooks/40-certificate.yml playbooks/90-selftest.yml --syntax-check)
 (cd updates && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-lint && ANSIBLE_CONFIG=$PWD/ansible.cfg ansible-playbook -i inventory/hosts.yml.example colac.homelab.update --syntax-check)
 '''
@@ -100,8 +100,13 @@ run = [
 ]
 
 # --------------------------------------------------------------------------
-# DNS — the Pi-hole container (dns/). A platform service: everything else
-# resolves through it, Packer and Terraform included.
+# DNS (dns/), two deployments sharing one inventory:
+# - Pi-hole on both resolvers, the Raspberry Pi and the LXC container. A
+#   platform service: everything else resolves through it, Packer and
+#   Terraform included. dns:tf/plan/apply (the container) and dns:play.
+# - The Pi's notification services: Tailscale, the private ntfy, the
+#   doorbell. dns:play:ntfy. No secrets: SSH keys only; the ntfy
+#   credentials are generated into dns/ansible/.secrets-cache/.
 # --------------------------------------------------------------------------
 [tasks."dns:tf"]
 description = "Any terraform command for the Pi-hole container: mise run dns:tf state list"
@@ -128,10 +133,17 @@ env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
 run = "{{config_root}}/.mise/sops-exec dns ansible-playbook"
 
 [tasks."dns:inventory"]
-description = "Show the Pi-hole inventory (no credentials)"
+description = "Show the dns/ inventory: groups pihole and ntfy (no credentials)"
 dir = "{{config_root}}/dns/ansible"
 env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
 run = "ansible-inventory --graph"
+
+[tasks."dns:play:ntfy"]
+description = "ansible-playbook for the Pi's notification services, no secrets; playbooks/ntfy.yml unless a playbook is named: mise run dns:play:ntfy --check --diff"
+dir = "{{config_root}}/dns/ansible"
+env = { ANSIBLE_CONFIG = "{{config_root}}/dns/ansible/ansible.cfg" }
+# Same argument handling as truenas:play.
+run = """bash -c 'for a in "$@"; do case "$a" in *.yml|*.yaml) [ -f "$a" ] && exec ansible-playbook "$@";; esac; done; exec ansible-playbook playbooks/ntfy.yml "$@"' dns:play:ntfy"""
 
 # --------------------------------------------------------------------------
 # TrueNAS — users, shares, snapshot and backup tasks, settings, through its

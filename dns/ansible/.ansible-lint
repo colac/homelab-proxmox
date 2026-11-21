@@ -2,3 +2,6 @@
 # `mise run lint:ansible`. Must stay green at the production profile.
 profile: production
 offline: true
+# The collection is linted in ../../ansible; this symlink would lint it twice.
+exclude_paths:
+  - collections/

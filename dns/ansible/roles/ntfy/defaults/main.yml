@@ -1,0 +1,16 @@
+---
+# The ntfy release, pinned. To bump: change the version and both checksums,
+# copied from the release's checksums.txt
+# (https://github.com/binwiederhier/ntfy/releases).
+ntfy_version: "2.38.1"
+ntfy_deb_sha256:
+  arm64: 535fbfe4d0a82ee0428f8bd133a0f4d2a3f23c700b632fd38ed7a22833bbf6d6
+  amd64: 11c09123b3c6163b76e04cd5fedd15e419287e622bc4843ac66fdaed8c75ebf4
+
+# How long the server keeps messages. The phone fetches what it missed when
+# it reconnects (after switching from Proton to Tailscale), and the runner
+# catches up after the laptop slept: keep it long.
+ntfy_cache_duration: 72h
+
+# This host is also the LAN's primary resolver.
+ntfy_memory_max: 256M

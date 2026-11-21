@@ -1,0 +1,12 @@
+---
+# The AI agent's limited account on both resolvers (colac.homelab.agent_access,
+# from this checkout). Needs the agent's keys on this machine first:
+# `mise run agent install` in homelab-proxmox-monitoring.
+#
+#   mise run dns:play playbooks/20-agent-access.yml --check --diff
+#   mise run dns:play playbooks/20-agent-access.yml --limit pihole-ct   # one host at a time
+- name: AI agent account
+  hosts: pihole
+  gather_facts: false
+  roles:
+    - colac.homelab.agent_access

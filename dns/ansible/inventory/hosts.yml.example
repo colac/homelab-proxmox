@@ -1,5 +1,5 @@
 ---
-# Resolvers NOT created by Terraform — today the Raspberry Pi. Copy to
+# Hosts NOT created by Terraform — today the Raspberry Pi. Copy to
 # hosts.yml (git-ignored) and fill in. The container (pihole-ct) comes from
 # inventory/pihole.yml, which dns/terraform generates; both end up in the
 # `pihole` group, so they get the same configuration.
@@ -8,11 +8,21 @@ all:
     pihole:
       hosts:
         pihole-pi:
-          # The temporary DHCP address while you first configure it, then
-          # 192.168.1.53 once the router reserves that for the Pi's MAC.
+          # Static from first boot (dns/raspberry-pi/network-config).
           ansible_host: 192.168.1.53
-          # The user created in Raspberry Pi Imager, with the deploy key's
-          # public half as its only SSH login. Raspberry Pi OS gives that user
-          # passwordless sudo, which ansible_become uses.
+          # The user dns/raspberry-pi/write-boot-config.sh created, with the
+          # deploy key's public half as its only SSH login and passwordless
+          # sudo, which ansible_become uses.
           ansible_user: CHANGE_ME
           ansible_become: true
+
+    # The second deployment: the Pi's notification services (Tailscale,
+    # ntfy, the doorbell; ../../NTFY.md). The Pi only; its connection
+    # settings come from the pihole group above.
+    ntfy:
+      hosts:
+        pihole-pi:
+          # The phone's host name on the tailnet, as `tailscale status`
+          # shows it. While it is online the doorbell stays quiet below
+          # priority 5: the phone already gets the private messages.
+          ntfy_doorbell_phone: CHANGE_ME

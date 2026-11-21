@@ -1,0 +1,309 @@
+---
+# The private ntfy server (monitoring's docs/ai-ops/architecture.md, D2).
+#
+# - The release's .deb, pinned by version and sha256. It brings the `ntfy`
+#   user and the systemd unit.
+# - Users, access rules and tokens are declared in server.yml, not created
+#   with the `ntfy user` CLI: the CLI needs a database that only exists
+#   after the first start, and declared entries are idempotent (ntfy
+#   provisions them at every start, and deletes the ones removed here).
+# - Credentials are generated on the controller, into
+#   ntfy_secrets_local_cache_dir, never typed and never in sops. The Pi keeps
+#   only bcrypt hashes of the passwords; tokens must be in server.yml.
+
+- name: Map the CPU to ntfy's package architecture
+  ansible.builtin.set_fact:
+    _ntfy_arch: "{{ {'aarch64': 'arm64', 'x86_64': 'amd64'}[ansible_architecture] | default('unsupported') }}"
+
+- name: Check the architecture has a pinned checksum
+  ansible.builtin.assert:
+    that: _ntfy_arch in ntfy_deb_sha256
+    fail_msg: "No pinned ntfy package for {{ ansible_architecture }} (ntfy_deb_sha256)."
+    quiet: true
+
+- name: Read the installed ntfy version
+  ansible.builtin.command: dpkg-query --show --showformat=${Version} ntfy
+  register: _ntfy_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install ntfy {{ ntfy_version }}
+  when: _ntfy_installed.stdout != ntfy_version
+  block:
+    - name: Download ntfy {{ ntfy_version }}
+      ansible.builtin.get_url:
+        url: "https://github.com/binwiederhier/ntfy/releases/download/v{{ ntfy_version }}/ntfy_{{ ntfy_version }}_linux_{{ _ntfy_arch }}.deb"
+        dest: "/var/cache/apt/archives/ntfy_{{ ntfy_version }}_linux_{{ _ntfy_arch }}.deb"
+        checksum: "sha256:{{ ntfy_deb_sha256[_ntfy_arch] }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install the package
+      ansible.builtin.apt:
+        deb: "/var/cache/apt/archives/ntfy_{{ ntfy_version }}_linux_{{ _ntfy_arch }}.deb"
+      when: not ansible_check_mode
+      notify: Restart ntfy
+
+# Under --check on the first run nothing was installed: there is no ntfy to
+# hash with and no `ntfy` group to own files, so the rest only reports.
+- name: Decide whether the rest can run
+  ansible.builtin.set_fact:
+    _ntfy_present: "{{ not ansible_check_mode or _ntfy_installed.stdout | length > 0 }}"
+
+# ---------------------------------------------------------------------------
+# Credentials, generated on the controller
+# ---------------------------------------------------------------------------
+
+- name: Create the cache for generated credentials (controller)
+  ansible.builtin.file:
+    path: "{{ ntfy_secrets_local_cache_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  # Writes only to the controller's git-ignored cache, so --check can read
+  # the values back below.
+  check_mode: false
+
+- name: Generate missing passwords (controller)
+  ansible.builtin.copy:
+    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-{{ item.name }}.password"
+    content: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=32) }}"
+    mode: "0600"
+    force: false
+  loop: "{{ ntfy_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  no_log: true
+
+# ntfy tokens: "tk_" and 29 characters, 32 in all.
+- name: Generate missing tokens (controller)
+  ansible.builtin.copy:
+    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-{{ item.name }}.token"
+    content: "tk_{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=29) }}"
+    mode: "0600"
+    force: false
+  loop: "{{ ntfy_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  no_log: true
+
+- name: Read the tokens
+  ansible.builtin.set_fact:
+    _ntfy_tokens: >-
+      {{ _ntfy_tokens | default({}) | combine({item.name:
+           lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-' ~ item.name ~ '.token')}) }}
+  loop: "{{ ntfy_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# The server's public name: the host's tailnet name (10-tailscale.yml)
+# ---------------------------------------------------------------------------
+
+- name: Read this host's tailnet name
+  ansible.builtin.command: tailscale status --json
+  register: _ntfy_tailscale
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Check that Tailscale is up (playbooks/10-tailscale.yml)
+  ansible.builtin.assert:
+    that:
+      - _ntfy_tailscale.rc == 0
+      - (_ntfy_tailscale.stdout | from_json).BackendState | default('') == 'Running'
+    fail_msg: "Tailscale is not running on this host: run playbooks/10-tailscale.yml first."
+    quiet: true
+
+- name: Derive the server's address
+  ansible.builtin.set_fact:
+    _ntfy_base_url: >-
+      https://{{ (_ntfy_tailscale.stdout | from_json).Self.DNSName | regex_replace('\.$', '') }}:{{ ntfy_https_port }}
+
+# ---------------------------------------------------------------------------
+# Server configuration
+# ---------------------------------------------------------------------------
+
+- name: Configure ntfy
+  when: _ntfy_present
+  block:
+    - name: Create the directories for hashes and local clients' tokens
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - /etc/ntfy/provisioned
+        - /etc/ntfy/clients
+
+    # bcrypt hashes are salted, so hashing every run would rewrite server.yml
+    # every run. A hash is made again only when its password changed, which
+    # the stored sha256 of the password tells.
+    - name: Hash each client's password (only when it changed)
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -euo pipefail
+          umask 077
+          dir=/etc/ntfy/provisioned
+          if [[ -s $dir/$NTFY_CLIENT.hash && "$(cat "$dir/$NTFY_CLIENT.sum" 2>/dev/null)" == "$NTFY_SUM" ]]; then
+            echo unchanged
+            exit 0
+          fi
+          printf '%s\n%s\n' "$NTFY_PASSWORD" "$NTFY_PASSWORD" | ntfy user hash >"$dir/$NTFY_CLIENT.hash.new" 2>/dev/null
+          mv "$dir/$NTFY_CLIENT.hash.new" "$dir/$NTFY_CLIENT.hash"
+          printf '%s' "$NTFY_SUM" >"$dir/$NTFY_CLIENT.sum"
+          echo hashed
+      environment:
+        NTFY_CLIENT: "{{ item.name }}"
+        NTFY_PASSWORD: "{{ lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-' ~ item.name ~ '.password') }}"
+        NTFY_SUM: "{{ lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-' ~ item.name ~ '.password') | hash('sha256') }}"
+      loop: "{{ ntfy_clients }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _ntfy_hash
+      changed_when: "'hashed' in _ntfy_hash.stdout"
+      no_log: true
+
+    - name: Read the password hashes
+      ansible.builtin.slurp:
+        src: "/etc/ntfy/provisioned/{{ item.name }}.hash"
+      loop: "{{ ntfy_clients }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _ntfy_hash_files
+      # Under --check a new client has no hash yet.
+      failed_when: false
+      no_log: true
+
+    - name: Collect the password hashes
+      ansible.builtin.set_fact:
+        _ntfy_hashes: >-
+          {{ _ntfy_hashes | default({}) | combine({item.item.name:
+               (item.content | b64decode | trim) if item.content is defined else 'HASHED-ON-THE-REAL-RUN'}) }}
+      loop: "{{ _ntfy_hash_files.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      no_log: true
+
+    - name: Write server.yml
+      ansible.builtin.template:
+        src: server.yml.j2
+        dest: /etc/ntfy/server.yml
+        owner: root
+        group: ntfy
+        mode: "0640"
+      notify: Restart ntfy
+      # Holds the tokens and hashes; --diff would print them.
+      diff: false
+
+    - name: Leave the tokens of this host's own services here (read with LoadCredential)
+      ansible.builtin.copy:
+        dest: "/etc/ntfy/clients/{{ item.name }}.token"
+        content: "{{ _ntfy_tokens[item.name] }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ ntfy_clients | selectattr('local', 'defined') | selectattr('local') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true
+
+    - name: Publish the server's address for local services (not a secret)
+      ansible.builtin.copy:
+        dest: /etc/ntfy/base-url
+        content: "{{ _ntfy_base_url }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Create the directory for ntfy's systemd drop-in
+      ansible.builtin.file:
+        path: /etc/systemd/system/ntfy.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Limit ntfy's memory and restart it if it stops
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ntfy.service.d/homelab.conf
+        content: |
+          # Managed by Ansible (homelab-proxmox dns/, role ntfy).
+          # This host is also the LAN's primary resolver.
+          [Service]
+          MemoryMax={{ ntfy_memory_max }}
+          Restart=always
+          RestartSec=5
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart ntfy
+
+    - name: Enable and start ntfy
+      ansible.builtin.systemd_service:
+        name: ntfy
+        enabled: true
+        state: started
+
+    - name: Apply configuration changes now
+      ansible.builtin.meta: flush_handlers
+
+# The base URL and the tokens the laptop needs, for monitoring's
+# `mise run agent install` (it reads them from this checkout).
+- name: Cache the server's address (controller)
+  ansible.builtin.copy:
+    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-base-url"
+    content: "{{ _ntfy_base_url }}\n"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+# ---------------------------------------------------------------------------
+# Prove it: up, closed to strangers, open to a token
+# ---------------------------------------------------------------------------
+
+- name: Check the server
+  when: _ntfy_present and not ansible_check_mode
+  block:
+    - name: Wait for ntfy to answer
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ntfy_port }}/v1/health"
+        return_content: true
+      register: _ntfy_health
+      until: _ntfy_health.json.healthy | default(false)
+      retries: 10
+      delay: 3
+
+    - name: Anonymous reads are refused (deny-all)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ntfy_port }}/{{ ntfy_topics.alerts }}/json?poll=1"
+        status_code: [401, 403]
+
+    - name: Each token reaches the topics it may read
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ntfy_port }}/{{ item.1 | regex_replace(':.*$', '') }}/json?poll=1"
+        headers:
+          Authorization: "Bearer {{ _ntfy_tokens[item.0.name] }}"
+        status_code: 200
+      loop: "{{ ntfy_clients | subelements('access') }}"
+      loop_control:
+        label: "{{ item.0.name }} {{ item.1 }}"
+      when: item.1 is search(':(ro|rw)$')
+      no_log: true

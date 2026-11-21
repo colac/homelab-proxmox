@@ -1,0 +1,30 @@
+# Managed by Ansible (homelab-proxmox dns/, role ntfy_doorbell).
+[Unit]
+Description=Ring the ntfy.sh doorbell for messages on the private ntfy
+Wants=network-online.target
+After=network-online.target ntfy.service tailscaled.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/ntfy-doorbell/doorbell.py
+Environment=DOORBELL_PRIVATE_URL=http://127.0.0.1:{{ ntfy_port }}
+Environment=DOORBELL_TOPICS={{ ntfy_doorbell_topics | join(',') }}
+Environment=DOORBELL_SERVER={{ ntfy_doorbell_server }}
+Environment="DOORBELL_TEXT={{ ntfy_doorbell_text }}"
+Environment=DOORBELL_PHONE={{ ntfy_doorbell_phone }}
+Environment=DOORBELL_MIN_PRIORITY={{ ntfy_doorbell_min_priority }}
+Environment=DOORBELL_THROTTLE_MINUTES={{ ntfy_doorbell_throttle_minutes }}
+# The token reads the private topics; the topic is the doorbell's name on
+# ntfy.sh. Both stay root-only on disk; systemd hands them to this service.
+LoadCredential=token:/etc/ntfy/clients/doorbell.token
+LoadCredential=topic:/etc/ntfy/clients/doorbell.topic
+DynamicUser=yes
+StateDirectory=ntfy-doorbell
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+MemoryMax=64M
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

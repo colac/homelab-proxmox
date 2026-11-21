@@ -1,0 +1,135 @@
+---
+# Tailscale from its own apt repository, then `tailscale serve` in front of
+# ntfy. Two things a role cannot do are checked and explained instead: the
+# one-time login, and HTTPS certificates being enabled for the tailnet.
+#
+# - Never Funnel: `serve` publishes to the tailnet only, and the play stops
+#   if Funnel is on for this host.
+# - --accept-dns=false: this host is the LAN's primary resolver and keeps
+#   its own resolv.conf; MagicDNS would replace it.
+# - No subnet routes yet (D3's second router): Pi-hole's listening mode has
+#   to change first (dns/NTFY.md).
+
+- name: Install Tailscale's signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_distribution_release }}.noarmor.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Tailscale's apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/tailscale.list
+    content: |
+      # Managed by Ansible (homelab-proxmox dns/). Tailscale's own list file.
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian {{ ansible_distribution_release }} main
+    owner: root
+    group: root
+    mode: "0644"
+  register: _tailscale_repo
+
+# Under --check on the first run the repository was not really added, so
+# apt cannot find the package: report instead of failing.
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if _tailscale_repo.changed else 3600 }}"
+  when: not (ansible_check_mode and _tailscale_repo.changed)
+
+- name: Check that the tailscale command exists
+  ansible.builtin.stat:
+    path: /usr/bin/tailscale
+  register: _tailscale_bin
+
+- name: Configure Tailscale
+  when: _tailscale_bin.stat.exists
+  block:
+    - name: Start tailscaled
+      ansible.builtin.systemd_service:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    - name: Read Tailscale's state
+      ansible.builtin.command: tailscale status --json
+      register: _tailscale_status
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Parse Tailscale's state
+      ansible.builtin.set_fact:
+        _tailscale_state: >-
+          {{ _tailscale_status.stdout | from_json
+             if _tailscale_status.stdout is match('\s*\{') else {} }}
+
+    - name: Stop until this host has been logged in to the tailnet once
+      ansible.builtin.assert:
+        that: _tailscale_state.BackendState | default('') == 'Running'
+        fail_msg: >-
+          Tailscale is installed, but this host is not on the tailnet (state:
+          {{ _tailscale_state.BackendState | default('unknown') }}). Log it in
+          once, by hand, then re-run this play:
+          ssh {{ ansible_user | default('<user>') }}@{{ ansible_host }}
+          sudo tailscale up --hostname={{ tailscale_hostname }} --accept-dns=false
+          and open the URL it prints. In the admin console, consider
+          "Disable key expiry" for this machine: it is a server.
+        quiet: true
+
+    - name: Read Tailscale's preferences
+      ansible.builtin.command: tailscale debug prefs
+      register: _tailscale_prefs
+      changed_when: false
+      check_mode: false
+
+    - name: Keep this host's own DNS settings (no MagicDNS on the LAN's resolver)
+      ansible.builtin.command: tailscale set --accept-dns=false
+      when: (_tailscale_prefs.stdout | from_json).CorpDNS | default(false)
+      changed_when: true
+
+    - name: Read what `tailscale serve` publishes
+      ansible.builtin.command: tailscale serve status --json
+      register: _tailscale_serve
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse to continue while Funnel is on
+      ansible.builtin.assert:
+        that: not (_tailscale_serve.stdout | default('{}', true) | from_json).AllowFunnel | default({})
+        fail_msg: >-
+          Tailscale Funnel is on for this host, which puts what it serves on
+          the internet. Turn it off (sudo tailscale funnel reset) and re-run.
+        quiet: true
+
+    - name: Publish ntfy to the tailnet
+      when: >-
+        not (_tailscale_serve.stdout is search(':' ~ tailscale_serve_https_port ~ '"')
+             and _tailscale_serve.stdout is search(tailscale_serve_target | regex_escape))
+      block:
+        - name: Serve ntfy over HTTPS, tailnet only, on port {{ tailscale_serve_https_port }}
+          ansible.builtin.command: >-
+            tailscale serve --bg --https={{ tailscale_serve_https_port }} {{ tailscale_serve_target }}
+          changed_when: true
+          register: _tailscale_serve_set
+      rescue:
+        - name: Explain why serving failed
+          ansible.builtin.fail:
+            msg: >-
+              `tailscale serve` failed. The usual cause is that the tailnet
+              has no HTTPS certificates yet: in the admin console, DNS page,
+              enable MagicDNS and "HTTPS Certificates", then re-run.
+              tailscale said: {{ _tailscale_serve_set.stderr | default(_tailscale_serve_set.msg | default('')) }}
+
+    - name: Show the private ntfy's address
+      ansible.builtin.debug:
+        msg: >-
+          ntfy on the tailnet:
+          https://{{ _tailscale_state.Self.DNSName | regex_replace('\.$', '') }}:{{ tailscale_serve_https_port }}
+
+- name: Say what --check could not show
+  ansible.builtin.debug:
+    msg: Tailscale is not installed yet; run without --check to install it and see the rest.
+  when: not _tailscale_bin.stat.exists

@@ -1,0 +1,19 @@
+---
+# The public server and what the doorbell says. The text is fixed: the
+# doorbell carries nothing from the alert but its priority.
+ntfy_doorbell_server: https://ntfy.sh
+ntfy_doorbell_text: Homelab needs you. Open Tailscale.
+
+# Ring for messages at or above this priority (5 critical, 4 warning or
+# approval waiting, 3 investigation started or finished, 2 recovered).
+ntfy_doorbell_min_priority: 3
+ntfy_doorbell_throttle_minutes: 15
+
+# The phone's host name on the tailnet; set it in inventory/hosts.yml.
+# Empty: the phone is never considered online, so every message rings.
+ntfy_doorbell_phone: ""
+
+# The private topics it follows.
+ntfy_doorbell_topics:
+  - "{{ ntfy_topics.alerts }}"
+  - "{{ ntfy_topics.agent }}"

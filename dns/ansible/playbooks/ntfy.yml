@@ -1,0 +1,13 @@
+---
+# The second deployment in dns/: the Pi's notification services, in order.
+# Tailscale (ntfy's only way in), ntfy, then the doorbell that watches it.
+# Pi-hole is site.yml's; nothing here touches it (../NTFY.md).
+#
+#   mise run dns:play:ntfy --check --diff
+#   mise run dns:play:ntfy
+- name: Tailscale
+  import_playbook: 30-tailscale.yml
+- name: Private ntfy
+  import_playbook: 40-ntfy.yml
+- name: Doorbell
+  import_playbook: 50-doorbell.yml

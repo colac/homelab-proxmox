@@ -1,15 +1,27 @@
-# DNS — two Pi-holes, one configuration
+# DNS — the LAN resolvers, and the Pi's notification services
 
-The homelab's LAN resolvers: Pi-hole v6 on **two hosts with identical
-configuration**, so either can answer every query.
+`dns/` holds **two deployments** that share one Ansible inventory:
+
+| Deployment | Hosts (Ansible group) | What | Run | Runbook |
+|---|---|---|---|---|
+| **Pi-hole** | `pihole`: `pihole-pi` and `pihole-ct` | The LAN's resolvers, with identical configuration | `mise run dns:play playbooks/site.yml` (reads `dns/secrets.yaml`) | this page |
+| **Notification services** | `ntfy`: `pihole-pi` only | Tailscale, the private ntfy server and the doorbell: how alerts reach the phone and Claude | `mise run dns:play:ntfy` (no secrets) | [NTFY.md](NTFY.md) |
+
+They live together because they share a machine: the Raspberry Pi is the
+one host that does not fail with the Proxmox node, so it carries both DNS
+and the way alerts get out. They stay separate deployments, with their own
+playbooks, `group_vars` and mise tasks, and neither touches the other's
+services. The rest of this page is about Pi-hole.
+
+## Pi-hole: two resolvers, one configuration
+
+Pi-hole v6 on **two hosts with identical configuration**, so either can
+answer every query.
 
 | Resolver | Address | Role | Created by | Configured by | Status |
 |---|---|---|---|---|---|
-| LXC container `pihole-ct` (ID 103) | **192.168.1.153** | failover | Terraform (`terraform/`) | Ansible (`ansible/`) | **live** since 2026-10-07 — today the only resolver |
-| Raspberry Pi `pihole-pi` | **192.168.1.53** | primary — physical, survives a Proxmox outage | Raspberry Pi Imager | Ansible (`ansible/`) | planned (core's TODO) |
-
-The hand-built Pi-hole that used to hold `.53` has been deleted, so nothing
-answers on `.53` until the Pi takes it.
+| LXC container `pihole-ct` (ID 103) | **192.168.1.153** | failover | Terraform (`terraform/`) | Ansible (`ansible/`) | **live** since 2026-10-07; the one the router and Tailscale hand out today |
+| Raspberry Pi `pihole-pi` | **192.168.1.53** | primary — physical, survives a Proxmox outage | Raspberry Pi Imager + `raspberry-pi/` first-boot files | Ansible (`ansible/`) | **live** since 2026-11-18 (Pi 3 B+, 1 GB, USB pen drive); router and Tailscale switch-over pending |
 
 Both hosts are in the Ansible group `pihole`, so one playbook run gives them
 the same records, upstreams, blocklists and password. Nothing is configured by
@@ -25,7 +37,7 @@ Proxmox API. That is why it lives in core rather than in workloads.
 | Secrets | `dns/secrets.yaml`: `dns_zone`, `pihole_web_password` |
 | Container | Debian 13 LXC, unprivileged, 1 core, 1 GB (Pi-hole + the Elastic Agent), 4G, fixed MAC; starts first on boot. State: Terraform Cloud workspace `DNS` |
 | Raspberry Pi | Raspberry Pi OS Lite 64-bit — Debian 13, the same base as the container |
-| Admin UI | `http://192.168.1.153/admin` (and `http://192.168.1.53/admin` once the Pi exists) |
+| Admin UI | `http://192.168.1.53/admin` (the Pi) and `http://192.168.1.153/admin` (the container) |
 
 ```mermaid
 flowchart LR
@@ -36,7 +48,7 @@ flowchart LR
   end
   play["mise run dns:play"]
   ct["pihole-ct · 192.168.1.153<br/>FTLCONF_* → read-only settings"]
-  pi["pihole-pi · 192.168.1.53<br/>planned"]
+  pi["pihole-pi · 192.168.1.53<br/>primary, not handed out yet"]
   pve[("Proxmox")]
   router["Router 192.168.1.1<br/>DHCP: DNS server(s)"]
   client(["LAN device"])
@@ -49,10 +61,7 @@ flowchart LR
   router -. "hands out" .-> client
   client -- "query" --> ct
   ts -- "zone queries via subnet route" --> ct
-  ct -- "everything not local or blocked" --> up
-
-  classDef planned stroke-dasharray: 5 5
-  class pi planned
+  ct & pi -- "everything not local or blocked" --> up
 ```
 
 ## How it is put together
@@ -81,12 +90,12 @@ flowchart LR
 
 ## The router
 
-**Today:** DNS Server 1 = `192.168.1.153`. **Once the Pi exists:** Server 1 =
-`192.168.1.53`, Server 2 = `192.168.1.153`. Three rules make that work:
+**Today:** DNS Server 1 = `192.168.1.153`. **At the switch-over** (the Pi is
+live and waiting for it): Server 1 = `192.168.1.53`, Server 2 = `192.168.1.153`. Three rules make that work:
 
 1. **Never a public resolver as server 2.** Many clients query both servers
    rather than one then the other, so a public one leaks ads past Pi-hole and
-   makes the private names fail at random. Until the Pi exists, leave server 2
+   makes the private names fail at random. Until the switch-over, leave server 2
    empty (or `.153` again) — DNS then goes down with Proxmox, which the Pi is
    for. Two Pi-holes with identical config are safe to mix; that is why the
    configuration is shared.
@@ -101,9 +110,8 @@ flowchart LR
    servers) or turn IPv6 DNS advertisement off.
 
 **Tailscale split-DNS** (admin console → DNS → the nameserver restricted to
-your zone) must name `192.168.1.153` — if it names only `.53`, where nothing
-answers yet, off-LAN devices cannot resolve `nextcloud.<zone>`. Add `.53` next
-to it once the Pi exists.
+your zone) must name `192.168.1.153`: off-LAN devices resolve `nextcloud.<zone>` through
+it. Add `.53` next to it at the switch-over.
 
 ## Verify it
 
@@ -163,43 +171,58 @@ resolver to be down: the container comes up beside whatever already answers.
 
 5. Router: reservation for `.153`, then **DNS Server 2 → `192.168.1.153`**.
 
-## Add the Raspberry Pi (primary, `.53`) — later
+## Add the Raspberry Pi (primary, `.53`) — done 2026-11-18
 
-Not deployed yet, and `.53` is free. The plan in core's TODO replaces step 1
-with cloud-init files kept in this folder and a `mise run dns:pi-image` task,
-so re-imaging never depends on clicking through Imager, and gives the Pi a
-static `.53`. That still needs rule 2's reservation (or an exclusion from the
-pool), or the router can lease `.53` to another device. The manual path,
-meanwhile:
+Live since 2026-11-18 (a Pi 3 B+, booting from a USB pen drive); the steps
+below rebuild it. The Pi takes a static `.53` from its
+first boot, which still needs rule 2's reservation (or an exclusion from the
+pool), or the router can lease `.53` to another device. Core's TODO adds a
+`mise run dns:pi-image <device>` task later, to flash and write the files in
+one step.
 
-1. **Flash it with Raspberry Pi Imager:** Raspberry Pi OS (other) →
-   **Raspberry Pi OS Lite (64-bit)**. In OS customisation:
-   - hostname `pihole-pi`, a username of your choice and a password (keep it
-     in your password manager — it is the console fallback);
-   - Services → **Enable SSH → Allow public-key authentication only**, and
-     paste the deploy key's public half: `cat ~/.ssh/homelab-proxmox.pub`;
-   - no Wi-Fi — a resolver belongs on Ethernet.
-2. **Boot it on Ethernet** and find the address it got from DHCP (the router's
-   client list). Note its MAC: `ssh <user>@<that-ip> ip link`.
+1. **Flash it, then write the first-boot files from this repo.** Raspberry
+   Pi OS 13 configures its first boot with cloud-init, from files on the boot
+   partition. Imager's own customisation screen is not used: Imager 1.x (the
+   version Ubuntu's apt ships) silently ignores it on this release, and the Pi
+   then boots into a keyboard and user wizard with SSH off.
+   - Raspberry Pi Imager → Raspberry Pi OS (other) → **Raspberry Pi OS Lite
+     (64-bit)** → write, answering **No** to OS customisation. A USB SSD or
+     pen drive works as well as a card on a Pi 4 or 5.
+   - Unplug and replug the drive so its `bootfs` partition mounts, then:
+
+     ```bash
+     dns/raspberry-pi/write-boot-config.sh "$(findmnt -no TARGET LABEL=bootfs)" <user name>
+     ```
+
+     It asks for a console password (stored only as a hash, on the drive),
+     and writes `user-data` (hostname `pihole-pi`, that user with the deploy
+     key's public half, SSH on, password login over SSH off) and
+     `network-config` (static `192.168.1.53`, public resolvers until Pi-hole
+     exists). The templates are in [raspberry-pi/](raspberry-pi/).
+2. **Boot it on Ethernet** and wait two or three minutes, then
+   `ssh -i ~/.ssh/homelab-proxmox <user>@192.168.1.53`. Note its MAC for the
+   router (`ip link show eth0`), and check nothing holds port 53
+   (`sudo ss -lunp 'sport = :53'` prints nothing). No wireless: a resolver
+   belongs on Ethernet.
 3. **Inventory:** `cp ansible/inventory/hosts.yml.example ansible/inventory/hosts.yml`
-   (git-ignored), set `ansible_user` to your username and `ansible_host` to the
-   **temporary** address.
-4. **Configure it on its temporary address:**
+   (git-ignored) and set `ansible_user` to your username; `ansible_host` is
+   already `192.168.1.53`.
+4. **Configure it** (not `--check` first: on a fresh host the dry run fails,
+   because Pi-hole is not installed yet). The container keeps answering the
+   whole time:
 
    ```bash
    mise run dns:inventory                   # pihole-ct and pihole-pi under pihole
    mise run dns:play playbooks/site.yml --limit pihole-pi
+   dig @192.168.1.53 pve.<zone> +short      # from the laptop: 192.168.1.169
    ```
 
-5. **Hand it `.53`** — the container keeps answering the whole time, so there
-   is no outage:
-   - on the router, reserve `.53` for the Pi's MAC; reboot the Pi;
-   - set `ansible_host: 192.168.1.53` in `hosts.yml`, then
-     `mise run dns:play playbooks/99-healthcheck.yml`.
+5. **Reserve `.53`** on the router for the Pi's MAC.
 6. **Point everything at it:** the router's DNS servers ([The router](#the-router)),
-   Tailscale split-DNS (add `.53`), TrueNAS's `nameserver2`, and the
-   monitoring agent (core's TODO lists all of them, plus the update procedure,
-   which does not cover the Pi yet).
+   Tailscale split-DNS (add `.53`), and TrueNAS (declared already: `.53`
+   first, `.153` second; `mise run truenas:play playbooks/site.yml`). The
+   monitoring agent runs on the Pi since 2026-11-18. Core's TODO tracks the
+   rest, and the update procedure, which does not cover the Pi yet.
 
 ## Operating it
 
@@ -210,6 +233,7 @@ Every command runs against **both** resolvers unless you add `--limit`.
 | Add or change a record | Edit `pihole_local_records` in `ansible/inventory/group_vars/pihole.yml`, then `mise run dns:play playbooks/10-pihole.yml --check --diff` and without `--check` |
 | Add a blocklist | Append to `pihole_adlists`, re-run the playbook |
 | Upgrade Pi-hole | One at a time, so one always answers: `mise run dns:play playbooks/10-pihole.yml -e pihole_upgrade=true --limit pihole-ct`, health check, then `--limit pihole-pi` |
+| The AI agent's account on both | `mise run dns:play playbooks/20-agent-access.yml --limit pihole-ct`, then `--limit pihole-pi` (needs `mise run agent install` in monitoring first; `colac.homelab.agent_access`) |
 | Rebuild the container | `mise run dns:tf apply -replace=proxmox_lxc.pihole`, then `mise run dns:play playbooks/site.yml --limit pihole-ct` — the Pi answers meanwhile |
 | Rebuild the Pi | Re-flash as above, then the playbook with `--limit pihole-pi` — the container answers meanwhile |
 | Change the admin password | `mise run secrets:edit dns`, re-run the playbook |
@@ -230,8 +254,6 @@ echo "192.168.1.169 pve.<zone>" | sudo tee -a /etc/hosts     # remove afterwards
 
 ## Not yet
 
-- **Monitoring** — neither resolver is an agent target of the monitoring repo
-  yet.
 - `home-nas.local` uses `.local`, which belongs to mDNS; some clients will not
   ask Pi-hole for it. A name in the private zone (`nas.<zone>`) would be more
   reliable — kept as-is for now, carried over from the hand-built Pi-hole.

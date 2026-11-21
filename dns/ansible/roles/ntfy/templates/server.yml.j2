@@ -1,0 +1,36 @@
+# Managed by Ansible (homelab-proxmox dns/, role ntfy). Edits here are lost.
+#
+# Reachable only through `tailscale serve` (tailnet, HTTPS); listens on
+# loopback. Users, access rules and tokens are provisioned from this file:
+# ntfy creates, updates and deletes them to match it at every start.
+
+base-url: "{{ _ntfy_base_url }}"
+listen-http: "127.0.0.1:{{ ntfy_port }}"
+# `tailscale serve` is the proxy; it sets X-Forwarded-For.
+behind-proxy: true
+
+cache-file: /var/cache/ntfy/cache.db
+cache-duration: "{{ ntfy_cache_duration }}"
+
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: deny-all
+enable-signup: false
+enable-login: true
+enable-reservations: false
+
+auth-users:
+{% for client in ntfy_clients %}
+  - "{{ client.name }}:{{ _ntfy_hashes[client.name] }}:user"
+{% endfor %}
+
+auth-access:
+{% for client in ntfy_clients %}
+{% for rule in client.access %}
+  - "{{ client.name }}:{{ rule }}"
+{% endfor %}
+{% endfor %}
+
+auth-tokens:
+{% for client in ntfy_clients %}
+  - "{{ client.name }}:{{ _ntfy_tokens[client.name] }}:ansible"
+{% endfor %}

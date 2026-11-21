@@ -31,3 +31,13 @@ pihole_cname_records: []
 pihole_upstreams:
   - 1.1.1.1
   - 9.9.9.9
+
+# The AI agent's account (playbooks/20-agent-access.yml,
+# colac.homelab.agent_access). Read tier everywhere; the act tier stays off
+# until the approval flow exists. Restarts are limited to these units, at
+# most once per unit per 6 hours. No Docker on these hosts.
+agent_access_restart_units: [pihole-FTL, elastic-agent]
+agent_access_free_disk: [journal, apt]
+agent_access_du_paths: [/var/log, /var/cache/apt, /etc/pihole, /tmp]
+# Debian 13 logs to the journal only; Pi-hole keeps its own files.
+agent_access_log_files: [/var/log/pihole/pihole.log, /var/log/pihole/FTL.log, /var/log/dpkg.log, /var/log/apt/history.log]

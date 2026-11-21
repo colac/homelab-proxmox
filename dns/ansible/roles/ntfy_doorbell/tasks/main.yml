@@ -1,0 +1,83 @@
+---
+# The doorbell service (files/doorbell.py explains the rules). Needs the ntfy
+# role first: it reads the doorbell's token from /etc/ntfy/clients/.
+
+- name: Check that the ntfy role has run (playbooks/20-ntfy.yml)
+  ansible.builtin.stat:
+    path: /etc/ntfy/clients/doorbell.token
+  register: _ntfy_doorbell_token
+
+- name: Stop if it has not
+  ansible.builtin.assert:
+    that: _ntfy_doorbell_token.stat.exists or ansible_check_mode
+    fail_msg: "/etc/ntfy/clients/doorbell.token is missing: run playbooks/20-ntfy.yml first."
+    quiet: true
+
+# The topic on ntfy.sh is the doorbell's only protection: anyone who knows
+# it can ring. 32 random characters, generated like the ntfy credentials.
+- name: Generate the doorbell topic if missing (controller)
+  ansible.builtin.copy:
+    dest: "{{ ntfy_secrets_local_cache_dir }}/ntfy-doorbell-topic"
+    content: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=32) }}"
+    mode: "0600"
+    force: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  no_log: true
+
+- name: Leave the doorbell topic here (read with LoadCredential)
+  ansible.builtin.copy:
+    dest: /etc/ntfy/clients/doorbell.topic
+    content: "{{ lookup('ansible.builtin.file', ntfy_secrets_local_cache_dir ~ '/ntfy-doorbell-topic') }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart ntfy-doorbell
+  no_log: true
+
+- name: Create the program's directory
+  ansible.builtin.file:
+    path: /usr/local/lib/ntfy-doorbell
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the program
+  ansible.builtin.copy:
+    src: doorbell.py
+    dest: /usr/local/lib/ntfy-doorbell/doorbell.py
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart ntfy-doorbell
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: ntfy-doorbell.service.j2
+    dest: /etc/systemd/system/ntfy-doorbell.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart ntfy-doorbell
+
+- name: Enable and start the doorbell
+  ansible.builtin.systemd_service:
+    name: ntfy-doorbell
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Check the doorbell is still running after a few seconds
+  ansible.builtin.service_facts:
+  register: _ntfy_doorbell_services
+  until: >-
+    _ntfy_doorbell_services.ansible_facts.services['ntfy-doorbell.service'].state | default('') == 'running'
+  retries: 3
+  delay: 5
+  when: not ansible_check_mode

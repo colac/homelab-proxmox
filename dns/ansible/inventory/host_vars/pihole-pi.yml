@@ -1,0 +1,5 @@
+---
+# The Raspberry Pi also runs the ntfy deployment (ntfy, the doorbell;
+# ../../NTFY.md) and monitoring's alert notifier. Their restarts are allowed too; tailscaled is
+# not: it is the way in when the Proxmox node is down.
+agent_access_restart_units: [pihole-FTL, elastic-agent, ntfy, ntfy-doorbell]

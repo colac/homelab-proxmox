@@ -1,0 +1,57 @@
+---
+# The `ntfy` group: the Pi's notification services (playbooks/ntfy.yml),
+# shared by the tailscale, ntfy and ntfy_doorbell roles. Hand-authored.
+# Pi-hole's settings are group_vars/pihole.yml's.
+#
+# The design and its reasons: homelab-proxmox-monitoring's
+# docs/ai-ops/architecture.md (Notifications; decisions D1, D2).
+
+# Generated credentials (ntfy passwords and tokens, the doorbell topic) are
+# machine state, not human-chosen secrets: created on the first run, kept
+# on the controller in dns/ansible/.secrets-cache/, git-ignored. Delete a
+# file to rotate it.
+ntfy_secrets_local_cache_dir: "{{ playbook_dir }}/../.secrets-cache"
+
+# ntfy listens on loopback only. `tailscale serve` publishes it to the
+# tailnet, over HTTPS, on ntfy_https_port. Nothing else reaches it.
+ntfy_port: 2586
+ntfy_https_port: 8443
+
+ntfy_topics:
+  alerts: homelab-alerts    # monitoring's notifier -> phone, runner
+  agent: homelab-agent      # the investigation runner -> phone
+  control: homelab-control  # the phone's buttons -> runner
+
+# Who may do what on the private server. Every client gets a generated
+# password and token; only the phone logs in with its password, the others
+# use their token. `local: true` leaves the token on this host for a service
+# here, at /etc/ntfy/clients/<name>.token (root, 0600), which its systemd
+# unit reads with LoadCredential.
+ntfy_clients:
+  - name: phone
+    access:
+      - "{{ ntfy_topics.alerts }}:ro"
+      - "{{ ntfy_topics.agent }}:ro"
+  # The token the phone's buttons send (Stop, Investigate). It travels inside
+  # the messages, so it may do nothing but write the control topic.
+  - name: actions
+    access:
+      - "{{ ntfy_topics.control }}:wo"
+    local: true
+  # monitoring's alert notifier, on this host.
+  - name: notifier
+    access:
+      - "{{ ntfy_topics.alerts }}:wo"
+    local: true
+  # The investigation runner, on the laptop (monitoring's agent/).
+  - name: runner
+    access:
+      - "{{ ntfy_topics.alerts }}:ro"
+      - "{{ ntfy_topics.agent }}:wo"
+      - "{{ ntfy_topics.control }}:ro"
+  # The doorbell service, on this host.
+  - name: doorbell
+    access:
+      - "{{ ntfy_topics.alerts }}:ro"
+      - "{{ ntfy_topics.agent }}:ro"
+    local: true

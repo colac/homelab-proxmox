@@ -1,10 +1,17 @@
-# AGENTS.md — DNS (Pi-hole)
+# AGENTS.md — DNS (Pi-hole) and the Pi's notification services
 
 Agent instructions for `dns/` (Claude Code loads this via `CLAUDE.md` when
 working here). Core's rules — secrets, git, Ansible — are in
 [../AGENTS.md](../AGENTS.md); the runbook is [README.md](README.md).
 
-These are the LAN's resolvers: a Raspberry Pi (`pihole-pi`, primary, `.53`,
+Two deployments share this folder and its one inventory: **Pi-hole** on
+both resolvers (group `pihole`, `playbooks/site.yml`, `mise run dns:play`) and
+the **notification services** on the Pi only (group `ntfy`: Tailscale, ntfy,
+the doorbell; `playbooks/ntfy.yml`, `mise run dns:play:ntfy`; runbook
+[NTFY.md](NTFY.md)). Keep them separate: a change to one never touches the
+other's playbooks, `group_vars` or services.
+
+The resolvers are a Raspberry Pi (`pihole-pi`, primary, `.53`,
 hand-flashed, in the git-ignored `inventory/hosts.yml`) and an LXC container
 (`pihole-ct`, failover, `.153`, created by `terraform/`). Both get the same
 configuration. A mistake here takes name resolution away from every device,
@@ -20,7 +27,8 @@ mise run dns:inventory      # no credentials
 ```
 
 Need credentials — ask the human first: `mise run dns:plan`, `dns:apply`,
-`dns:tf …`, `dns:play …`.
+`dns:tf …`, `dns:play …`. No credentials, but it reaches a live machine — ask
+first too: `mise run dns:play:ntfy …`.
 
 ## Deliberate decisions — do not "fix"
 
@@ -41,3 +49,20 @@ Need credentials — ask the human first: `mise run dns:plan`, `dns:apply`,
   127.0.0.1: it must resolve the installer's downloads before Pi-hole exists.
 - **`colac.homelab.common` is not run here** — it asserts Docker, which this
   container deliberately lacks.
+
+## The notification services (`ntfy` group, the Pi only)
+
+The Pi is also the primary resolver: anything here that breaks the Pi
+breaks DNS for every device.
+
+- **Never touch Pi-hole from these roles** (`tailscale`, `ntfy`,
+  `ntfy_doorbell`): no restart, no config, no package.
+- **Never Tailscale Funnel**, never a port forward: ntfy is reachable from
+  the tailnet only. The tailscale role stops if Funnel is on.
+- **`--accept-dns=false` stays**: the resolver keeps its own resolv.conf.
+- **Never read `ansible/.secrets-cache/`**: generated ntfy passwords and
+  tokens, and the doorbell topic. Refer to the files by name.
+- **The doorbell carries nothing but its fixed text and a priority.** Alert
+  content goes to the private server only.
+- Topic names and the files under `/etc/ntfy/clients/` are a contract with
+  monitoring ([NTFY.md](NTFY.md), "What other repos rely on").

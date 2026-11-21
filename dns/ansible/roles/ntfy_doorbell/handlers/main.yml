@@ -1,0 +1,6 @@
+---
+- name: Restart ntfy-doorbell
+  ansible.builtin.systemd_service:
+    name: ntfy-doorbell
+    state: restarted
+    daemon_reload: true
