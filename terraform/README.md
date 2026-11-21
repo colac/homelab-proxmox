@@ -20,7 +20,7 @@ Projects pin it to a release tag of this repo:
 
 ```hcl
 module "nextcloud" {
-  source = "git::https://github.com/colac/homelab-proxmox.git//terraform/modules/base-vm?ref=v2.0.0"
+  source = "git::https://github.com/colac/homelab-proxmox.git//terraform/modules/base-vm?ref=vX.Y.Z"
 
   vm_name        = var.vm_name
   template_name  = var.template_name   # a template this repo's Packer built

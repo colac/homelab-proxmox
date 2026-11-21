@@ -51,7 +51,9 @@ workloads the app comes first.
 | Ansible (credentials) | — | `mise run play <playbook> [args]` | `mise run play <app> <playbook> [args]` |
 | Inventory / SSH check | — | `mise run inventory` / `ping` | `mise run inventory <app>` / `ping <app>` |
 | Packer (credentials) | `mise run packer:validate <release>` / `packer:build <release>` | — | — |
-| DNS (credentials) | `mise run dns:plan` / `dns:apply` / `dns:tf <args>` / `dns:play <playbook>` | — | — |
+| DNS: Pi-hole (credentials) | `mise run dns:plan` / `dns:apply` / `dns:tf <args>` / `dns:play <playbook>` | — | — |
+| DNS: the Pi's notification services (no credentials) | `mise run dns:play:ntfy [playbook]` (default `playbooks/ntfy.yml`) / `dns:inventory` | — | — |
+| AI agent (no credentials) | — | `mise run obs …` / `hostctl <host> <verb>` / `agent <command>` | — |
 | TrueNAS | `mise run truenas:play [playbook]` (default `playbooks/site.yml`) / `truenas:inventory` / `truenas:update[:backup\|:apply]`; `truenas:certificate` (credentials) | — | — |
 | Secrets | `mise run secrets:edit [dns\|TrueNAS]` / `secrets:check` | `mise run secrets:edit` / `secrets:check` | same, plus `secrets:edit <app>` |
 | Next release version | `mise run release:dry-run` | same | same |

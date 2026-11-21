@@ -81,33 +81,36 @@ workloads for Nextcloud and k3s.
       2026-10-14) — until then `pct start` on it is the rollback
 - [ ] **Router:** DHCP reservation for `.153` (`BC:24:11:00:01:53`), and check
       what it advertises as IPv6 DNS. Server 2: not a public resolver (it
-      leaks ads and breaks private names at random) — leave it empty or `.153`
-      until the Pi exists, then `.153` with the Pi as server 1. On 2026-11-10
-      a laptop on the LAN still got `1.1.1.1` as its second DNS server
-- [ ] **Later — add the Raspberry Pi as primary** at `192.168.1.53`
-      (Raspberry Pi OS Lite 64-bit, configured by the same playbook). Until
-      then DNS goes down with Proxmox. Image it from the repo, not by hand:
-      Raspberry Pi OS on Debian 13 provisions first boot with cloud-init, and
-      `rpi-imager --cli` takes the files (`--cloudinit-userdata`,
-      `--cloudinit-networkconfig`). So: tracked `dns/raspberry-pi/user-data`
-      (hostname, user, deploy key, no password login over SSH) and
-      `network-config` (**static `.53` on the Pi itself**; the router's DHCP
-      pool still covers `.53`, so reserve or exclude it there too), the
-      console password hash in `dns/secrets.yaml`, and a
-      `mise run dns:pi-image <device>` task that renders them through
-      sops-exec and flashes the card. Build it when the Pi is in hand, so it
-      is tested against the real thing. Also needed before it joins:
-  - **Updates:** `updates/` cannot update it yet. `updates/ansible.cfg` loads
-    only the generated `pihole.yml`, and `updates/inventory/group_vars/pihole.yml`
-    sets `update_kind: lxc` and `update_proxmox_name: pihole` for the whole
-    group, so a Pi in it would be treated as the container. The `update` role
-    knows only `vm`, `lxc` and `pve`; a physical host needs its own kind (no
-    snapshot, its own reboot)
-  - **Once it answers on `.53`:** router server 1 → `.53`; Tailscale
-    split-DNS adds `.53`; TrueNAS's `nameserver2` (now the router, in
-    `TrueNAS/ansible/inventory/group_vars/truenas.yml`) → `.53`; its agent
-    (monitoring's `docs/rollout-pve-and-pihole.md`, A6)
-- [ ] **Monitor them**: add both to the monitoring repo's agent targets
+      leaks ads and breaks private names at random) — `.153`, with the Pi as
+      server 1 (the switch-over below). On 2026-11-10 a laptop on the LAN got
+      `1.1.1.1` as its second DNS server
+- [x] **Added the Raspberry Pi as primary** at `192.168.1.53` (2026-11-18;
+      Pi 3 B+, Raspberry Pi OS Lite 64-bit on Debian 13), configured by the
+      same playbook. Flashed with Raspberry Pi Imager, then the first-boot
+      files `dns/raspberry-pi/write-boot-config.sh` writes (hostname, user,
+      deploy key, static `.53`)
+- [ ] **`mise run dns:pi-image <device>`:** flash the card and write the
+      first-boot files in one step, instead of Imager then the script
+- [ ] **Switch over to the Pi:** router server 1 → `.53` (server 2 → `.153`)
+      and a DHCP reservation for `.53`; Tailscale split-DNS adds `.53`;
+      TrueNAS: already declared (`.53` first, `.153` second, in
+      `TrueNAS/ansible/inventory/group_vars/truenas.yml`), applied by the next
+      `mise run truenas:play playbooks/site.yml`. Until then DNS still goes
+      down with Proxmox. Monitoring's
+      `docs/ai-ops/deployment.md` step 8 has the same list
+- [ ] **Updates for the Pi:** `updates/` cannot update it yet.
+      `updates/ansible.cfg` loads only the generated `pihole.yml`, and
+      `updates/inventory/group_vars/pihole.yml` sets `update_kind: lxc` and
+      `update_proxmox_name: pihole` for the whole group, so the Pi would be
+      treated as the container. The `update` role knows only `vm`, `lxc` and
+      `pve`; a physical host needs its own kind (no snapshot, its own reboot).
+      Until then: `apt` by hand, which also covers ntfy and Tailscale
+- [x] **Monitor them:** both are agent targets on `dns-agents-policy`
+      (`pihole-ct` 2026-10-08, `pihole-pi` 2026-11-18); the `pihole-silent`
+      alert rule is written in monitoring, not applied yet
+- [ ] **The Pi's notification services** (`dns/NTFY.md`: Tailscale, the
+      private ntfy, the doorbell): written 2026-11-19, not applied. Steps in
+      monitoring's `docs/ai-ops/deployment.md`, step 1
 - [ ] **Move `home-nas.local` into the zone** (`nas.<zone>`): `.local` is
       mDNS's, and some clients never ask Pi-hole for it
 - [ ] **CoreDNS** as an authoritative zone with transfers to the secondary —
@@ -121,6 +124,9 @@ workloads for Nextcloud and k3s.
       profile, so it can be turned on now
 - [ ] **`mise.lock`.** Run `mise lock` once and commit it, so every machine
       installs byte-identical tools (checksums, not just versions)
-- [ ] **A read-only agent identity.** A separate age key and a
-      `PVEAuditor`-only Proxmox token an AI agent can use for validation and
-      plans, with builds and applies kept for the human
+- [ ] **AI agent identities.** Written 2026-11-20, not applied:
+      `colac.homelab.agent_access` (a forced-command `homelab-agent` account on
+      every Linux host) and `homelab-agent@pve` (`proxmox/configure.sh`).
+      Steps in monitoring's `docs/ai-ops/deployment.md`, steps 4 and 5. Still
+      open from the first idea: a separate age key, so an agent could run
+      plans without the human's key

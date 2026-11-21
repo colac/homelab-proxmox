@@ -19,6 +19,7 @@ Heavily "inspired" by
 | I want to… | Read |
 |---|---|
 | understand how it all fits together | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| see every machine, container and service, and how they talk | [docs/ARCHITECTURE.md § Runtime view](docs/ARCHITECTURE.md#runtime-view) |
 | set up my machine and work in any of the repos | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | issue, store or rotate a credential | [docs/CREDENTIALS.md](docs/CREDENTIALS.md) |
 | build a VM template | [packer/README.md](packer/README.md) |
@@ -36,11 +37,12 @@ flowchart LR
   subgraph core["homelab-proxmox (core)"]
     pk["packer/<br/>ubuntu-24.04 · ubuntu-26.04"]
     bv["terraform/modules/base-vm"]
-    cl["ansible/ — colac.homelab<br/>common · docker_data"]
-    dns["dns/ — Pi-hole"]
+    cl["ansible/ — colac.homelab<br/>common · docker_data · agent_access · update"]
+    dns["dns/ — Pi-hole<br/>+ the Pi's ntfy, Tailscale"]
   end
   pve[("Proxmox<br/>templates")]
   ct(["LXC pihole-ct<br/>192.168.1.153"])
+  pi(["Raspberry Pi pihole-pi<br/>192.168.1.53"])
   mon["monitoring repo"]
   wl["workloads repo"]
 
@@ -49,15 +51,16 @@ flowchart LR
   bv -- "?ref=vX.Y.Z" --> mon & wl
   cl -- "requirements.yml version: vX.Y.Z" --> mon & wl
   dns -- "terraform + ansible" --> ct
-  ct -- "resolves pve, nextcloud, kibana" --> mon & wl
+  dns -- "ansible" --> pi
+  ct & pi -- "resolve pve, nextcloud, kibana" --> mon & wl
 ```
 
 | Artifact | Consumed as |
 |---|---|
 | Proxmox templates `ubuntu-24.04-template` (Nextcloud), `ubuntu-26.04-template` (monitoring, k3s) | `template_name` in each Terraform project |
-| DNS: Pi-hole at `192.168.1.153` and its record list | every host resolves through it; another repo adds a name by a PR to `dns/ansible/inventory/group_vars/pihole.yml` |
+| DNS: Pi-hole at `192.168.1.53` (Pi) and `192.168.1.153` (container) and its record list | every host resolves through them; another repo adds a name by a PR to `dns/ansible/inventory/group_vars/pihole.yml` |
 | `base-vm` module | `git::https://github.com/colac/homelab-proxmox.git//terraform/modules/base-vm?ref=vX.Y.Z` |
-| `colac.homelab` collection (`common`, `docker_data`) | a git source at the same tag in `ansible/requirements.yml` |
+| `colac.homelab` collection (`common`, `docker_data`, `agent_access`, `update`) | a git source at the same tag in `ansible/requirements.yml` |
 
 Consumers pin a **release tag**, never a branch, so a change here reaches a VM
 only when its repo bumps the pin — one consumer at a time, reversible by moving
@@ -79,7 +82,7 @@ mise run packer:build 26.04                    # build a template (credentials, 
 | `packer/ubuntu-24.04/`, `packer/ubuntu-26.04/` | Template builds (`proxmox-iso`) |
 | `terraform/modules/base-vm/` | The one VM module |
 | `ansible/` | The `colac.homelab` collection (`galaxy.yml` at its root): `common`, `docker_data`, and the update procedure (`update` role, playbook `colac.homelab.update`) |
-| `dns/` | Pi-hole in an LXC container: Terraform, Ansible, its own `secrets.yaml` |
+| `dns/` | Two deployments, one inventory: Pi-hole on the Raspberry Pi and an LXC container (Terraform, Ansible, its own `secrets.yaml`; `mise run dns:play`), and the Pi's notification services: Tailscale, the private ntfy, the doorbell (`mise run dns:play:ntfy`, [dns/NTFY.md](dns/NTFY.md)) |
 | `proxmox/` | The Proxmox host: `configure.sh` (roles, users, tokens, media, metric server) and the encrypted config backup |
 | `updates/` | The update procedure for core's machines (Proxmox host, Pi-hole): `mise run update` |
 | `docs/` | Homelab-wide: architecture, credentials, development, updates |
