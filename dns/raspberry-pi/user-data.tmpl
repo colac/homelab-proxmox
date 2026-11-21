@@ -1,0 +1,29 @@
+#cloud-config
+# First-boot configuration for pihole-pi (Raspberry Pi OS Lite 64-bit,
+# Debian 13). Rendered onto the boot partition by write-boot-config.sh;
+# never edit the rendered copy. ${PI_USER}, ${PI_PASSWORD_HASH} and
+# ${PI_SSH_KEY} are filled in at render time, so no user name, hash or key
+# is stored in this repo.
+hostname: pihole-pi
+manage_etc_hosts: true
+timezone: Europe/Lisbon
+keyboard:
+  layout: pt
+
+users:
+  - name: ${PI_USER}
+    # Only groups that exist on every Debian: an unknown group makes useradd
+    # fail, and then no user is created at all.
+    groups: [adm, sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    # The password is for the console only (a resolver that lost its network
+    # is fixed with a keyboard). SSH refuses passwords below.
+    lock_passwd: false
+    passwd: "${PI_PASSWORD_HASH}"
+    ssh_authorized_keys:
+      - "${PI_SSH_KEY}"
+
+# Raspberry Pi OS's own key: SSH is off by default on its images.
+enable_ssh: true
+ssh_pwauth: false

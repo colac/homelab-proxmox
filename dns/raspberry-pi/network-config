@@ -1,0 +1,22 @@
+# Static address for pihole-pi, applied by cloud-init through netplan and
+# NetworkManager. Copied as-is by write-boot-config.sh.
+#
+# Resolvers are public, not 127.0.0.1: the Pi must resolve the Pi-hole
+# installer's downloads before Pi-hole exists (the same reason as the
+# container's bootstrap_nameservers). Pi-hole answers on its own address
+# whatever this file says.
+#
+# The router's DHCP pool still covers .53: reserve it for the Pi's MAC there
+# too, or the router may lease it to another device.
+network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    eth0:
+      dhcp4: false
+      addresses: [192.168.1.53/24]
+      routes:
+        - to: default
+          via: 192.168.1.1
+      nameservers:
+        addresses: [1.1.1.1, 9.9.9.9]
